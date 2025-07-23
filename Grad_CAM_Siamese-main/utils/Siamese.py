@@ -7,14 +7,17 @@ from typing import Any, Dict, Sequence, Union
 TorchData = Union[Dict[str, torch.Tensor], Sequence[torch.Tensor], torch.Tensor]
 
 
-class ContrastiveLoss(torch.nn.Module):
+# Siamese 모델 정의, 특성 추출(backbone), 유사도 계산
+
+
+class ContrastiveLoss(torch.nn.Module): # 이미지 쌍의 거리에 따라 학습 신호를 주는 손실 함수
     """
     Contrastive loss function.
     """
 
     def __init__(self, margin=2.0):
         super(ContrastiveLoss, self).__init__()
-        self.margin = margin
+        self.margin = margin # 다른 클래스는 적어도 이만큼 떨어져야 한다는 기준 (기본값 2.0)
 
     def forward(self, label, distance):
         '''
@@ -28,9 +31,12 @@ class ContrastiveLoss(torch.nn.Module):
         Returns
         -------
         Loss value
-        '''        
-        loss_contrastive = torch.mean( (1.0-label) * torch.pow(distance, 2) + (label) * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2))
-
+        '''                # mean: 전체 배치에서 평균 손실 계산 -> 배치 단위 학습과 잘 맞도록 설계됨       
+        loss_contrastive = torch.mean( (1.0-label) * torch.pow(distance, 2) # 유사한 경우
+                                      + (label) * torch.pow(torch.clamp(self.margin - distance, min=0.0),2)) # 다른 경우
+        # 유사한 이미지 쌍: label 0, distance가 작을수록 loss 작음 (모델이 두 임베딩을 가깝도록 유도)
+        # 다른 이미지 쌍: label 1, destance가 margin보다 작으면 loss 발생 (크면 X) -> dissimilar한 이미지는 최소 margin만큼 떨어지도록 학습
+        
         return loss_contrastive
         
         
@@ -50,13 +56,14 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
     
 
-class SiameseNetwork(nn.Module):
+class SiameseNetwork(nn.Module): # nn.Module을 상속한 메인 모델 클래스 -> Backbone CNN + Feature Pooling + Fully Connected Layer 묶어줌
+    # 클래스 생성자	      입력 이미지 크기	            사용할 백본 모델 이름	             사전학습된 가중치 사용 여부
     def __init__(self, image_size=(3, 224, 224), backbone_model:str='MobileNet', pretrained:bool=True):
         super(SiameseNetwork, self).__init__()
         
         self.backbone_model = backbone_model
         self.distance = F.pairwise_distance # 두 벡터 사이의 유클라디안 거리 계산 (임베딩된 이미지 쌍 서리로 유사도 수치화)
-        self.loss_fnc = ContrastiveLoss() # 이미지 쌍 유사: 거리 작게 // 비유사: 거리 크게 학습 유도
+        self.loss_fnc = ContrastiveLoss() # 이미지 쌍 유사: 거리 작게 // 비유사: 거리 크게 학습 유도 = 손실 함수 정의
         # Placeholder for the gradients
         self.gradients_1 = None # image1, 2에 대한 Grad-CAM 시각화를 위해 필요한 gradient 저장
         self.gradients_2 = None # Siamese에서는 두 이미지가 각각 독립된 백본 경로(sub-network)를 통과하기 때문에 grad-CAM 시각화를 위해 각각 저장해야 함
@@ -67,17 +74,17 @@ class SiameseNetwork(nn.Module):
 
         # Backbone model and pooling layer
         # -------------------------------------------------------------------------------------------
-        if self.backbone_model == 'MobileNet':
-            # Siamese network backbone: MobileNet_V2
+        if self.backbone_model == 'MobileNet': 
+            # Siamese network backbone: MobileNet_V2           # (classifier 제외) 합성곱 계층만 가져와서 .features
             self.backbone = torchvision.models.mobilenet_v2(pretrained=pretrained).features
-            # Pooling
+            # Pooling: 출력 피쳐맵을 1*1로 압축하는 aver- 풀링 적용    ImageNet 가중치 사용
             self.pooling = nn.AdaptiveAvgPool2d(output_size=(1, 1))
 
         elif self.backbone_model == 'ResNet50':
             # Siamese network backbone: ResNet50
             model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V2)
-            self.backbone = nn.Sequential(*list(model.children())[:-2])
-            # Pooling
+            self.backbone = nn.Sequential(*list(model.children())[:-2]) # 마지막 FC 제외하고 모두 가져옴
+            # Pooling: 위와 똑같이
             self.pooling = nn.AdaptiveAvgPool2d(output_size=(1, 1))
 
         else:
@@ -85,15 +92,22 @@ class SiameseNetwork(nn.Module):
 
 
 
-        # Dense-layer
+        # Dense-layer : FC layer, 임베딩 생성기
         # ------------------------------------------------------------------------------------------- # full connected layers to produce embedding vector
-        n_size = self._get_conv_output( image_size )  # determine the number of features coming out of the backbone's pooling layer
-        self.fc = nn.Sequential(
+        n_size = self._get_conv_output( image_size )  # determine the number of features coming out of the backbone's pooling layer = 출력 채널 수 계산
+        self.fc = nn.Sequential( # CNN의 마지막 출력(feature map)을 받아서 최종 2차원 임베딩 벡터로 생성 (시각화 용이) // 고차원~성능
             nn.Linear(in_features=n_size, out_features=256), # n_size 정확히 몇인지 미리 알아야 함: 이미지 크기나 백본 모델에 따라 피처 크기가 달라짐
             nn.ReLU(inplace=True),
             nn.Linear(in_features=256, out_features=2),  
-        )    
-
+        ) 
+        # 풀링된 feature를 ..->256->2차원 임베딩으로 변환하는 FC layer 정의  
+    '''
+    입력 이미지
+    → backbone CNN (MobileNet/ResNet) (눈. 사전학습된 네트워크 -> feature map 출력)
+    → AdaptiveAvgPool → Flatten (feature map pooling(1*1))
+    → FullyConnected (Linear → ReLU → Linear) (정보 요약/변환. 뽑아낸 정보를 요약해서 벡터로 바꿔줌)
+    → 2D 임베딩
+    '''
 
 
     # generate input sample and forward to get shape

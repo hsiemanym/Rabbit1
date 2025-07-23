@@ -107,7 +107,7 @@ test_dl = DataLoader(dataset = Dataset(data=test_dataset, tfms=test_tfms),
                      pin_memory=True: GPU로의 전송 속도를 높이기 위해 설정(최적화)
 '''
 
-#학습, 검증, 테스트에 각각 몇 개의 이미지 쌍(pair)이 생성되었는지 출력
+# 학습, 검증, 테스트에 각각 몇 개의 이미지 쌍(pair)이 생성되었는지 출력
 # [img1_path, img2_path, label] 구조. 총 쌍의 개수를 len()으로 확인
 # p-n 각각 하나씩 만들기 때문에 개수는 짝수가 된다 + 전체 이미지 개수의 2배 정도가 된다(iterations에 따라 달라짐)
 print('[INFO] Training instances: ', train_dataset.__len__())
