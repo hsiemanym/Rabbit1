@@ -13,6 +13,9 @@ def imshow(image:torch.Tensor=None, heatmap:np.ndarray=None, scale:float=0.4, me
         heatmap: Grad-CAM heatmap (optional)
         scale: Scaling parameters for merging Grad-CAM heatmap with image
     '''
+
+    # heatmap에 JET 컬러맵을 적용해서 컬러 오버레이를 만들고 이를 반투명하게(scale=0.5) 만들어 원본 이미지에 더하는 역할
+
     # Convert image to NumPy
     npimg = image.squeeze(0).cpu().numpy()
 
@@ -20,7 +23,7 @@ def imshow(image:torch.Tensor=None, heatmap:np.ndarray=None, scale:float=0.4, me
     npimg = npimg * np.array(std)[:,None,None] + np.array(mean)[:,None,None]  # Unnormalize
 
     # Reshape
-    npimg = np.transpose(npimg, (1, 2, 0))
+    npimg = np.transpose(npimg, (1, 2, 0)) # 결과적으로 npimg는 heatmap 색상이 덧입혀진 원본 이미지
 
     if heatmap is not None:
         heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET) / 255.0

@@ -29,58 +29,65 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 """### Siamese neural network model"""
 
-# Load model
-model = torch.load(os.path.join(params['checkpoints_path'], "model.pth"));
-model.eval();
-# Load transformation
+# Load model(trained) : 학습된 모델과 이미지 전처리에 필요한 transform 로드
+model = torch.load(os.path.join(params['checkpoints_path'], "model.pth")); # torch.load()로 저장된 모델 전체(model.pth) 불러옴
+model.eval(); # 평가 모드로 전환
+# Load transformation (학습 때와 동일한 이미지 전처리 방식을 사용하기 위해 transform 로드, 테스트용 transform만 필요하므로 뒤쪽만 가져옴)
 _, tfms = load_transformations(params)
 
 """### Load data"""
 
 # Load image 1
 # ----------------------------------------------------------------------------------------
-A = Image.open('./Data/Flowers/Rose/9167147034_0a66ee3616_n.jpg').convert('RGB')
-
-image1 = convert_to_tensor(A, tfms, device).unsqueeze(0)
-imshow(image=image1,
+A = Image.open('./Data/Flowers/Rose/9167147034_0a66ee3616_n.jpg').convert('RGB') # JPG -> PIL 이미지 객체로 로즈 이미지 A를 열고, 컬러 모드를 RGB로 변환
+                                           # shape를 [C, H, W] -> [1, C, H, W]로 변환(모델이 한 번에 여러 장의 이미지를 처리할 수 있도록 배치 차원 추가)
+image1 = convert_to_tensor(A, tfms, device).unsqueeze(0) # Grad-CAM에 정의된 함수 convert_to_tensor() : PIL 이미지를 tfms 처리하고 GPU로 보냄
+imshow(image=image1, # 정규화를 원래대로 되돌려서 저장
        mean=params['image']['normalization']['mean'],
        std=params['image']['normalization']['std'],
        figsize=(3,3),
        figname='Image1.png')
 
 
-# Load image 2
+# Load image 2 # 1과 같은 구조
 # ----------------------------------------------------------------------------------------
 B = Image.open('./Data/Flowers/Rose/4612830331_2a44957465_n.jpg').convert('RGB')
-
-image2 = convert_to_tensor(B, tfms, device).unsqueeze(0)
-imshow(image=image2,
+        # util.Grad-CAM에 정의된 함수, transform을 적용하고 GPU로 옮겨주는 역할
+image2 = convert_to_tensor(B, tfms, device).unsqueeze(0) # 모델이 입력으로 [1, 3, H, W] 형태를 받기 때문에 .unsqueeze(0)을 이용해 배치 차원 추가
+imshow(image=image2, # 정규화된 텐서를 mean, std 값을 기준으로 un-normalize한 이미지를 저장하는 함수 (heatmap은 아직 없음)
        mean=params['image']['normalization']['mean'],
        std=params['image']['normalization']['std'],
        figsize=(3,3),
-       figname='Image2.png')
+       figname='Image2.png') # 방금 만든 image 텐서를 사람이 보기 좋은 원래 이미지로 복원해서 저장
+
+# 이 두 이미지는 나중에 Grad_CAM heatmap을 덧입힐 기준 이미지가 될 것임
+# image1, 2,는 모델에 넣을 준비가 된 1장짜리 batch 임
+
 
 """## Factual explanations"""
 
 # Calculate model's prediction
-pred = model(image1, image2)
-print(f'Disimilarity: {100*pred.item():.1f}%')
-# Backpropagation
-pred.backward()
+# forward pass without label (SiameseNetwork의 forward() 호출(Siamese.py) -> 두 이미지 간의 거리(dissimilarity 반환)
+pred = model(image1, image2) # label 없으므로 loss는 계산x, 거리만 출력
+print(f'Disimilarity: {100*pred.item():.1f}%') # pred.item() : tensor -> float * 100 (%)
+# Backpropagation : forward는 pred 계산에서 이미 했으므로, backward pass 해서 gradient 얻어야 함 (이후 conv feature map + gradient로 heatmap 만들기)
+pred.backward() # ∇ₐ₁, ∇ₐ₂ (pred) : 각 이미지의 마지막 conv layer 출력에 대한 gradient -> model.gradients_1(2) 변수에 저장됨(Siamese.py line 129)
+    # backward()는 파이토치 함수
 
 """### Image 1"""
 
-heatmap = Gram_CAM_heatmap(image1, model, 1, params['image']['size'], 'Factual_heatmap1.png');
+        # Grad-CAM.py에 정의된 함수 (Grad-CAM 계산)       입력 이미지 크기(-> 히트맵 리사이즈)
+heatmap = Gram_CAM_heatmap(image1, model, 1, params['image']['size'], 'Factual_heatmap1.png'); # image1의 branch에 해당하는 heatmap 생성
 
-imshow(image=image1,
+imshow(image=image1, # heatmap을 원본 이미지 위에 반투명하게 덧씌움 (imshow.py)
        heatmap=heatmap,
-       scale=0.5,
+       scale=0.5, # 투명도 조절
        mean=params['image']['normalization']['mean'],
        std=params['image']['normalization']['std'],
        figsize=(3,3),
-       figname='Factual_Image1_Grad-CAM.png')
+       figname='Factual_Image1_Grad-CAM.png') # 저장됨
 
-"""### Image 2"""
+"""### Image 2""" # Image 1과 같은 방식으로 반복
 
 heatmap = Gram_CAM_heatmap(image2, model, 2, params['image']['size'], 'Factual_heatmap2.png')
 
@@ -92,12 +99,24 @@ imshow(image=image2,
        figsize=(3,3),
        figname='Factual_Image2_Grad-CAM.png')
 
-"""### Counterfactual explanations"""
+'''
+두 이미지 저장 & 출력 (입력 이미지 + 유사 판단 공통 특징 영역에 빨간색으로 표시된 heatmap)
+모델이 단순히 추측하는 것이 아니라, 실제로 핵심 부위를 보고 유사성을 판단한다는 interpretable explanation 제공)
+'''
 
-# Calculate model's (inverse) prediction
-pred = 1 - model(image1, image2)
+
+
+
+"""### Counterfactual explanations"""
+'''모델이 반대의 결정을 내리게 했을 법한 이미지 영역 강조'''
+
+# Calculate model's (inverse) prediction : # 여기서 모델을 다시 forward
+pred = 1 - model(image1, image2)  # 모델의 출력=거리(비유사도)이므로, 1-를 해서 backprop
 # Backpropagation
 pred.backward()
+# backward() 호출 -> hook 실행 -> grad_1, 2에 counterfactual 기준 grad 저장(덮어씌움)
+# backprop 하면 factual 거리에 대한 gradient의 부호가 반대로 됨 : d(1-distance)/dA = - d(distance)/dA -> 강조되면 거리를 벌리는  요소들이 강조됨
+
 
 """### Image 1"""
 
@@ -105,7 +124,7 @@ heatmap = Gram_CAM_heatmap(image1, model, 1, params['image']['size'], 'Counterfa
 
 imshow(image=image1,
        heatmap=heatmap,
-       scale=0.4,
+       scale=0.4, # factual보다 좀 더 투명
        mean=params['image']['normalization']['mean'],
        std=params['image']['normalization']['std'],
        figsize=(3,3),
@@ -122,3 +141,10 @@ imshow(image=image2,
        std=params['image']['normalization']['std'],
        figsize=(3,3),
        figname='Counterfactual_Image2_Grad-CAM.png')
+
+'''
+counterfactual heatmap은 모델이 반대 결론을 내리도록 영향을 줄 수 있는 이미지 영역을 보여줌
+두 이미지 사이에 공통되지 않은 특징 강조 (유사도를 낮추는..)
+
+다르다고 판단한 것이 factual인 경우는 같아보이는 요소들을 강조
+'''
