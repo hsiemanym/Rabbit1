@@ -34,23 +34,25 @@ from utils.performance_evaluation import performance_evaluation
 
 # Get configuration
 with open("config.yml", 'r') as stream:
-    params = yaml.safe_load(stream) # config.yml 파일 열고 거기 있는 설정 값들을 param에 저장 (데이터 경로, 배치 크기, 학습률 등의 하이퍼파라미터)
-if params['cuda']:
+    params = yaml.safe_load(stream) # config.yml 파일 열고 거기 있는 설정 값들을 parame 딕셔너리에 저장 (데이터 경로, 배치 크기, 학습률 등의 하이퍼파라미터)
+if params['cuda']: # param['cuda'] = True면 (GPU 쓸 수 있으면)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-# random, numpy, torch 모두 같은 시드 값을 넣어(각각의 난수 발생기 시드를 고정하여) 항상 동일한 학습 결과가 나오도록 함
+# random, numpy, torch 모두 같은 시드 값을 넣어(각각의 난수 발생기 시드를 고정하여) 항상 동일한 학습 결과가 나오도록 함(재현성 확보)
 random.seed(params['seed'])
 torch.manual_seed(params['seed'])
 torch.cuda.manual_seed(params['seed'])
 # When running on the CuDNN backend, two further options must be set
 torch.backends.cudnn.deterministic = True # GPU 내부 연산이 무작위로 바뀌지 않도록(deterministic) 설정 (결과를 예측 가능하게 함)
-torch.backends.cudnn.benchmark = False    # 성능 튜닝을 위한 자동 벤치마크 off - 결과가 매번 다르게 나오는 것 방지
+torch.backends.cudnn.benchmark = False    # 성능 튜닝을 위한 자동 벤치마크 off - 일부 연산 성능 희생 but 결과가 매번 다르게 나오는 것 방지
 # Set a fixed value for the hash seed
-os.environ["PYTHONHASHSEED"] = str(params['seed'])  # 파이썬 자체의 해시 함수도 동일한 결과를 내도록 시드 고정
+os.environ["PYTHONHASHSEED"] = str(params['seed'])  # 파이썬 자체의 해시 함수도 동일한 결과를 내도록 시드 고정 (파이썬의 딕셔너리 순서 등도 일정하게 유지)
 torch.set_float32_matmul_precision('medium')
+# 실험 결과를 반복 가능하게(reproducible) -> 연구나 디버깅에 유용
 
-"""### Data Loader"""
+
+"""### Data Loader""" # DaterLoaders 생성 -> 모델과 학습 구성 요소들 초기화
 
 # Retrieve dataset
 df = get_dataset(params) # (utils.py line 6에 설명 있음) param의 설정에 따라 데이터셋의 이미지 경로와 클래스 라벨을 담은 df 생성
@@ -117,17 +119,21 @@ print('[INFO] Testing instances: ', test_dataset.__len__())
 """### Training"""
 
 # Setup model
-model = SiameseNetwork(backbone_model=params['backbone_model']).to(device)
+model = SiameseNetwork(backbone_model=params['backbone_model']).to(device) # 모델 초기화
+#params['backbone_model']에 지정된 백본 모델(MobileNet 등)을 이용해 SiameseNetwork 인스턴스를 만들고 GPU/CPU로 보냄(to(device))
 
-# Setup optimizer
-if params['hyperparameters']['optimizer'] == 'AdamW':
-    optimizer = torch.optim.AdamW(model.parameters(), lr=float(params['hyperparameters']['learning_rate']))
+# Setup optimizer : 옵티마이저 이름 가져오기 opt_name = params['hyperparameters']['optimizer'] -> 설정 파일에서 어떤 옵티마이저 쓸지 가져옴
+# 즉, 어떤 옵티마이저를 사용할지는 설정 파일에 따라 달라짐 (3가지 지원)
+if params['hyperparameters']['optimizer'] == 'AdamW': # AdamW 쓰기로 되어있으면 lerning_rate를 가져와서 AdamW 옵티마이저로 설정
+    optimizer = torch.optim.AdamW(model.parameters(), lr=float(params['hyperparameters']['learning_rate'])) # 학습률은 설정 파일의 params['hyperparameters']['learning_rate']에서 가져옴
+    # AdamW는 Adam에 weight decay가 추가된 버전 (따로 설정하지 않으면  Adam과 비슷하게 작동. 원한다면 옵티마이저 생성 시 추가 가능)
 elif params['hyperparameters']['optimizer'] == 'Adam':
     optimizer = torch.optim.Adam(model.parameters(), lr=float(params['hyperparameters']['learning_rate']))
 elif params['hyperparameters']['optimizer'] == 'SGD':
     optimizer = torch.optim.SGD(model.parameters(), lr=float(params['hyperparameters']['learning_rate']))
 
 
+# LRScheduler.py 안의 클래스 불러옴 -> optimizer 학습률 모니터링/조절 -> 성능 정체 시 자동 감소
 scheduler = LRScheduler(optimizer = optimizer,
                         patience  = params['LRScheduler']['patience'],
                         min_lr    = params['LRScheduler']['min_lr'],
@@ -135,45 +141,49 @@ scheduler = LRScheduler(optimizer = optimizer,
                         verbose   = params['LRScheduler']['verbose'])
 
 # Early stopping
+#early_stopping.py 안의 클래스 불러옴 -> 과적합 방지를 위해, 성능이 일정 시간 개선되지 않으면 학습 조기 종료
 early_stopping = EarlyStopping(patience  = params['early_stopping']['patience'],
                                min_delta = params['early_stopping']['min_delta'])
 
-best_AUC = 0.0
+best_AUC = 0.0 # 지금까지 관찰된 최고 validaion AUC 저장 -> 모델을 저장할지 판단할 때 사용
 history = {'train_loss': [], 'valid_loss': [],
            'train_accuracy': [], 'valid_accuracy': [],
            'train_AUC': [], 'valid_AUC': []}
+# history 딕셔너리는 학습 과정에서의 각 epoch마다 loss, accuracy, AUC 등의 값을 누적 저장 (기록용) -> 나중에 그래프나 분석에 사용
 
 
-for epoch in range(params['hyperparameters']['epochs']):
+# 에폭 단위 학습 루프
+for epoch in range(params['hyperparameters']['epochs']): # 전체 학습은 epochs 수만큼 반복
 
     t0 = time.time()
 
     # Activate training mode
-    model.train()
+    model.train() # train() 호출 -> 모델을 학습 모드로 전환 (Dropout, BatchNorm 등 활성화)
+    # model.train()은 dropout, batchnorm이 학습 모드로 작동하도록 보장
 
     # setup loop with TQDM and dataloader
-    loop = tqdm(train_dl, leave=True)
+    loop = tqdm(train_dl, leave=True) # tqdm으로 현재 학습 루프 진행 상황을 보여주는 progress bar 생성
     # setup epoch's metrics
-    metrics = {'losses': [], 'accuracy': [], 'AUC': []}
-    for step, (img1, img2, labels) in enumerate(loop):
+    metrics = {'losses': [], 'accuracy': [], 'AUC': []} # 각 에폭 동안의 손실, 정확도, AUC를 저장할 빈 리스트 생성
+    for step, (img1, img2, labels) in enumerate(loop): # 각 미니배치(step)마다 image1, image2, label을 GPU(device)로 옮김
         img1, img2, labels = img1.to(device), img2.to(device), labels.to(device)
-        # initialize calculated gradients
+        # initialize calculated gradients: 모델 기울기 초기화 (이전 배치에서 남은 기울기 초기화)
         optimizer.zero_grad()
-        # Get loss and predictions
+        # Get loss and predictions: Siamese 모델을 통해 두 이미지의 순전파 결과(유사도(predictions)와 contrastive loss(loss))를 계산
         predictions, loss = model(img1, img2, labels)
-        # Calculate performance metrics
+        # Calculate performance metrics : 성능_평가 함수를 통해 해당 배치의 정확도와 AUC 계산
         accuracy, AUC, _ = performance_evaluation(labels, predictions)
         # Backpropagate errors
-        loss.backward()
-        # Clip gradient norm
+        loss.backward() # 손실 함수에 대한 모델 파라미터의 기울기(grad) 계산(역전파) (이 때 image1, 2 피쳐에 대한 기울기도 함께 저장 (추후 Grad-CAM에 활용)
+        # Clip gradient norm: 기울기(grad) 폭주(explosion) 방지를 위해 gradient norm을 일정 값 이하로 클리핑
         torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=params['hyperparameters']['max_norm'])
-        # update parameters
+        # update parameters: 계산된 기울기를 이용해 모델 파라미터(가중치) 업데이트
         optimizer.step()
-        # Add loss
+        # Add loss : 해당 배치의 손실값, 정확도, AUC를 리스트에 저장 (에폭 요약용)
         metrics['losses'].append(loss.item())
         metrics['accuracy'].append(accuracy)
         metrics['AUC'].append(AUC)
-        # add stuff to progress bar in the end
+        # add stuff to progress bar in the end : 진행 바 위에 에폭 진행 상황과 손실/정확도를 출력 (각 반복바다 진행 바에 설명(에폭/총 에폭 수)과 성능 지표(postfix) 표시
         loop.set_description(f"Epoch [{epoch+1}/{params['hyperparameters']['epochs']}]")
         loop.set_postfix(loss=f"{np.mean(metrics['losses']):.3f}",
                          accuracy=f"{np.mean(metrics['accuracy']):.2f}%",
@@ -185,60 +195,66 @@ for epoch in range(params['hyperparameters']['epochs']):
     train_AUC = np.mean(metrics['AUC'])
 
 
-    model.eval()
+    model.eval() # validation phase: 모델을 평가(eval) 모드로 바꿈 (.eval() 호출 시 dropout, batchnorm 등은 학습 시와 다른 동작, backprop 없이 성능만 평가)
+    # 2*2 confusion matrix 초기화 - TP, TN, FP, FN값들을 누적할 배열 준비
     ConfusionMatrix = np.array([[0,0],[0,0]]) # LIVIERIS
-    # setup loop with TQDM and dataloader
+    # setup loop with TQDM and dataloader : tqdm으로 검증 루프에 progress bar 표시
     loop = tqdm(valid_dl, leave=True)
     # setup epoch's metrics
-    metrics = {'losses': [], 'accuracy': [], 'AUC': []}
-    for step, (img1, img2, labels) in enumerate(loop):
-        img1, img2, labels = img1.to(device), img2.to(device), labels.to(device)
-        # Get loss & predictions
-        predictions, loss = model(img1, img2, labels)
+    metrics = {'losses': [], 'accuracy': [], 'AUC': []} # 각 배치마다 계산된 loss/정확도/AUC를 저장할 리스트 딕셔너리
+    for step, (img1, img2, labels) in enumerate(loop): # 검증 데이터셋에서 배치 단위로 이미지 쌍과 라벨을 불러옴
+        img1, img2, labels = img1.to(device), img2.to(device), labels.to(device) # GPU로 전송
+        # Get loss & predictions : grad 저장 없이 예측 수행 (validation은 학습이 아니므로 backprop 필요 없음)
+        predictions, loss = model(img1, img2, labels) # model.forward()가 거리값 + contrastive loss를 리턴
         # Calculate performance metrics
-        accuracy, AUC, CM = performance_evaluation(labels, predictions)
-        ConfusionMatrix+=CM
-        # Add loss/accuracy/AUC
+        accuracy, AUC, CM = performance_evaluation(labels, predictions) # 유사/비유사 구분 정확도(accuracy), AUC(ROC 곡선 하 면적), CM(혼동 행렬 2*2)
+        ConfusionMatrix+=CM # 현재 배치의 CM을 전체 행렬에 누적 계산 (혼동 행렬은 정확도 외의 정보(TP, TN 등)도 파악하게 해줌
+        # Add loss/accuracy/AUC # 이 배치의 성능을 기록 (배치 단위)
         metrics['losses'].append(loss.item())
         metrics['accuracy'].append(accuracy)
         metrics['AUC'].append(AUC)
 
 
-        # add stuff to progress bar in the end
+        # add stuff to progress bar in the end: tqdm 진행 표시줄 업데이트 + 현재 평균 loss accuracy AUC 등을 화면에 표시
         loop.set_description(f"Epoch [{epoch+1}/{params['hyperparameters']['epochs']}]")
         loop.set_postfix(loss=f"{np.mean(metrics['losses']):.3f}",
                          accuracy=f"{np.mean(metrics['accuracy']):.2f}%",
                          AUC=f"{np.mean(metrics['AUC']):.3f}")
-    print(ConfusionMatrix) # LIVIERIS
-    # Calculate test loss/MSE
+    print(ConfusionMatrix) # LIVIERIS : 검증 전체 결과의 CM 출력
+    # Calculate test loss/MSE : 에폭 전체의 평균 성능 계산
     valid_loss = np.mean(metrics['losses'])
     valid_accuracy = np.mean(metrics['accuracy'])
     valid_AUC = np.mean(metrics['AUC'])
 
-    # Elapsed time per epoch
-    elapsed = format_time(time.time() - t0)
+
+#Saving Best Model and Adjusting Learning Rate
+
+    # Elapsed time per epoch : track epoch duration (not heavily used here)
+    elapsed = format_time(time.time() - t0) # 한 epoch이 걸린 시간 기록 (t0=시작 시점) (여기선 epoch 시간이 크게 사용되지 않지만 추적용으로 저장)
 
 
-    # Store performance
+    # Store performance (Saving history)
     history['train_loss'].append(train_loss)
     history['valid_loss'].append(valid_loss)
     history['train_accuracy'].append(train_accuracy)
     history['valid_accuracy'].append(valid_accuracy)
     history['train_AUC'].append(train_AUC)
     history['valid_AUC'].append(valid_AUC)
+    # epoch 단위별 matric(훈련/검증 손실, 정확도, AUC 값)을 각각 history 딕셔너리에 저장 (이후 시각화나 분석을 위해 epoch별 결과를 누적 저장)
 
-    # Update best model
+    # Update best model : 검증 AUC가 지금까지 최고값을 넘는다면 모델 전체(구조+가중치)를 저장하고 best_AUC를 갱신 (일반적으로는 전체 말고 state_dict만 저장함)
     if valid_AUC > best_AUC:
         print('[INFO] Model saved')
         if (not os.path.exists(params['checkpoints_path'])):
             os.mkdir(params['checkpoints_path'], exist_ok=True)
-        torch.save(model, os.path.join(params['checkpoints_path'], "model.pth"))
-        best_AUC = valid_AUC
+        torch.save(model, os.path.join(params['checkpoints_path'], "model.pth")) # model.pth로 저장, 이전보다 성능이 좋을 때만 저장해서 체크포인트를 효율적으로 관리
+        best_AUC = valid_AUC # 업데이트(갱신)
 
-    # Learning rate scheduler
-    scheduler(valid_AUC)
+    # Learning rate scheduler : Adjusting Learning Rate (현재 검증 AUC를 기반으로 learning rate 조정)
+    # 파이토치의 ReduceLROnPlateau 스케줄러를 wrapping한 사용자 정의 스케줄러가 작동
+    scheduler(valid_AUC) # 기본 파이토치는 보통 loss가 낮아지는 걸 기준으로 작동하므로 AUC 쓸 때는 주의
 
-    # Early Stopping
+    # Early Stopping : 조건 충족(early_stopping(valid_AUC)가 True를 반환)시 학습 루프 중단 (성능 향상 없으면 조기 종료하여 과적합 방지)
     if early_stopping(valid_AUC): break
 
 import pandas as pd
@@ -253,14 +269,17 @@ ax[0].legend(frameon=False, fontsize=12);
 ax[1].legend(frameon=False, fontsize=12);
 
 """### Evaluation"""
+# 학습이 끝나면(모든 epoch 마쳤거나 / early stopping으로 조기 종료거나) best saved model을 이용해 test set에 대해 빠르게 최종 평가 수행
 
 # Load optimized model
-model = torch.load(params['checkpoints_path'] + '/model.pth')
-model.eval()
+model = torch.load(params['checkpoints_path'] + '/model.pth') # model.pth: 이전 단계에서 best AUC를 기록한 모델이 저장된 파일
+        # = 저장된 모델 전체를 다시 불러옴
+model.eval() # dropout같은 것을 꺼서 평가 모드로 전환
 
 # setup loop with TQDM and dataloader
 loop = tqdm(test_dl, leave=True)
 # setup epoch's metrics
+# test_loader에 있는 test 데이터들을 한 번씩 돌면서 각 배치에 대해 loss, AUC, accurcy의 평균값 계산
 metrics = {'losses': [], 'accuracy': [], 'AUC': []}
 for step, (img1, img2, labels) in enumerate(loop):
     img1, img2, labels = img1.to(device), img2.to(device), labels.to(device)
@@ -284,3 +303,18 @@ for step, (img1, img2, labels) in enumerate(loop):
 print(f"[INFO] Loss: {np.mean(metrics['losses']):.3f}")
 print(f"[INFO] AUC: {np.mean(metrics['AUC']):.3f}")
 print(f"[INFO] Accuracy: {np.mean(metrics['accuracy']):.2f}%")
+'''
+출력 예시 
+[INFO] Loss: 0.050 --> 모델의 전반적 손실 낮음
+[INFO] AUC: 0.97 --> ROC 커브 아래 면적이 0.97 (거의 완벽)
+[INFO] Accuracy: 94.50% --> test 데이터에서 94.5% 정확도로 분류
+'''
+
+'''
+이로써 전체 훈련 과정 완료.
+학습된 siamese 모델을 model.pth로 저장했고, test 데이터에 대해 어느 정도의 accuracy 및 AUC를 달성했는지 확인했음
+
+학습 스크립트에는 training/validation accuracy 및 loss 곡선을 시각화하는 코드도 포함돼 있음 (history 딕셔너리를 기반으로 matplotlib 사용)
+    -> 과적합 여부나 early stopping이 제대로 작동했는지 시각적으로 확인 가능
+
+'''
