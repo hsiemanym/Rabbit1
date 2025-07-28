@@ -4,7 +4,7 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
-from utils.Siamese import SiameseNetwork
+from Siamese import SiameseNetwork
 
 def convert_to_tensor(image:np.ndarray=None, tfms:transforms=None, device:str='cpu')->torch.Tensor:
     # 1. tfms를 이용해 PIL 이미지 A에 대해 resize, tensor 변환, normalize 처리
