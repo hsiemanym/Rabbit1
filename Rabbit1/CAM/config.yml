@@ -11,6 +11,7 @@ features:
   embedding_cache: features/embeddings.pth    # 저장될 레퍼런스 임베딩
   generic_bank: features/generic_bank.pth     # GFB 벡터 저장 위치
   patch_file: features/patches.pth            # 모든 이미지 패치 임베딩 (GFB 입력용)
+  gfb_option: B                               # A → 평균 기반 / B → K-means 기반 (더 general)
 
 # ------------------------
 # 이미지 설정

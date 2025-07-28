@@ -55,7 +55,7 @@ def is_generic_patch(patch_feat, gfb, threshold=0.9):
     return sims.max().item() > threshold
 
 
-def filter_heatmap_with_gfb(feature_map, heatmap, gfb, threshold=0.9):
+def filter_heatmap_with_gfb(feature_map, heatmap, gfb, threshold=0.7):
     """
     feature_map: [C, H, W]
     heatmap: [H, W]

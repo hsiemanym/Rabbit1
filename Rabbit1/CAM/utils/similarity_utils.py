@@ -69,3 +69,31 @@ def rank_similarities(query, candidates, topk=1, use_torch=True):
         scores.append((i, sim))
     scores.sort(key=lambda x: x[1], reverse=True)
     return scores[:topk]
+
+@torch.no_grad()
+def compute_counterfactual_score(fmap_query, fmap_ref, gfb, threshold=0.9):
+    """
+    각 query patch가 reference와 GFB 어디에도 없을 경우 counterfactual로 간주하여 강조
+    Returns:
+        counterfactual mask: [H, W]
+    """
+    C, H, W = fmap_query.shape
+    query_patches = fmap_query.permute(1, 2, 0).reshape(-1, C)  # [H*W, C]
+    ref_patches = fmap_ref.permute(1, 2, 0).reshape(-1, C)      # [H*W, C]
+
+    query_patches = F.normalize(query_patches, dim=1)
+    ref_patches = F.normalize(ref_patches, dim=1)
+    gfb = F.normalize(gfb, dim=1)
+
+    mask = []
+    for qp in query_patches:
+        # Reference와 최대 유사도
+        ref_sim = torch.nn.functional.cosine_similarity(qp.unsqueeze(0), ref_patches).max()
+        gfb_sim = torch.nn.functional.cosine_similarity(qp.unsqueeze(0), gfb).max()
+
+        if ref_sim < threshold and gfb_sim < threshold:
+            mask.append(1.0)  # counterfactual
+        else:
+            mask.append(0.0)
+    return torch.tensor(mask, device=fmap_query.device).view(H, W)
+
