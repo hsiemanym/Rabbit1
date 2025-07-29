@@ -49,17 +49,25 @@ def annotate_image(img, text):
     draw.text((10, 5), text, fill="white", font=font)
     return img
 
-def assemble_2x2_grid(img_list, rows=2, cols=2, labels=None):
-    assert len(img_list) == rows * cols
-    if labels is not None:
-        img_list = [annotate_image(img.copy(), lbl) for img, lbl in zip(img_list, labels)]
+def assemble_2x2_grid(img_list, labels=None, rows=2, cols=2, font_size=20):
+    assert len(img_list) == rows * cols, f"Expected {rows * cols} images, got {len(img_list)}"
 
     w, h = img_list[0].size
-    grid = Image.new('RGB', (cols * w, rows * h))
-    for i in range(rows):
-        for j in range(cols):
-            grid.paste(img_list[i * cols + j], (j * w, i * h))
+    grid = Image.new('RGB', (cols * w, rows * h), color=(255, 255, 255))
+
+    font = ImageFont.load_default()
+
+    draw = ImageDraw.Draw(grid)
+
+    for idx, img in enumerate(img_list):
+        row = idx // cols
+        col = idx % cols
+        grid.paste(img, (col * w, row * h))
+        if labels and idx < len(labels):
+            draw.text((col * w + 10, row * h + 10), labels[idx], fill=(255, 0, 0), font=font)
+
     return grid
+
 
 
 def save_image(image, path):

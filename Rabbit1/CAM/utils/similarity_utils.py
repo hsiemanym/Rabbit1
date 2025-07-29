@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import torch
 import numpy as np
+import torch.nn.functional as F
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
 
 def cosine_similarity_torch(x1: torch.Tensor, x2: torch.Tensor) -> float:

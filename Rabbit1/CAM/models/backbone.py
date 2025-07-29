@@ -90,14 +90,14 @@ class SimSiamBackbone(nn.Module):
         return self.encoder(x)
 
     def get_embedding(self, x):
-        """
-        Only z (projection vector), no prediction head
-        """
-        with torch.no_grad():
-            feats = self.encoder(x)
-            pooled = self.pool(feats).flatten(1)
-            z = self.projection_head(pooled)
+        feats = self.encoder(x)
+        pooled = self.pool(feats).flatten(1)
+        z = self.projection_head(pooled)
         return z
+
+    def get_embedding_nograd(self, x):
+        with torch.no_grad():
+            return self.get_embedding(x)
 
     def forward_backbone(self, x):
         """
