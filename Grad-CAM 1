@@ -1,0 +1,109 @@
+[33mcommit f6a1154da4801503179d2d08306950b8ee2d7ccd[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Mon Jul 28 16:03:21 2025 +0900
+
+    Grad-CAM 1
+
+[33mcommit 9c4eb9771ae6889fb1c58cd3623d944491516350[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Mon Jul 28 14:46:00 2025 +0900
+
+    CEE 버전1
+
+[33mcommit f4566d8b9d6e6dae077ba5f370bf25ef17e0e96b[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 24 16:37:03 2025 +0900
+
+    디렉터리 구조 완료
+
+[33mcommit 76a86cd6abe825d3a349849cbaa26451d1e1ae6c[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 24 16:05:03 2025 +0900
+
+    각주 완료
+
+[33mcommit 4b60b4f24f1a2056dbb10803e907631dc3ca1819[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 24 13:17:01 2025 +0900
+
+    01.py 각주 완료
+
+[33mcommit c0fcd2b2664bbb20d7202238349760224688b84b[m
+Author: 김회연 <kimhoeyeon@MacBook-Air-3.local>
+Date:   Wed Jul 23 21:51:48 2025 +0900
+
+    9p 완료
+
+[33mcommit cdf1e0c65694568c84ab8823720d6c7ff633a3de[m
+Author: 김회연 <kimhoeyeon@MacBook-Air-3.local>
+Date:   Wed Jul 23 20:37:41 2025 +0900
+
+    Ignore macOS .DS_Store
+
+[33mcommit 1db135113342d7b778e66aa7a95524816a9673fc[m
+Merge: e229749 6b80e3d
+Author: 김회연 <kimhoeyeon@MacBook-Air-3.local>
+Date:   Wed Jul 23 20:35:07 2025 +0900
+
+    Merge remote-tracking branch 'origin/master'
+
+[33mcommit e22974907d7d115864f92b4f9d3e1d536fcdc44a[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Wed Jul 23 17:56:07 2025 +0900
+
+    5.p Siamese 차례
+
+[33mcommit f43debae13614b83f04385385150b5b0474f48f6[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Wed Jul 23 16:09:20 2025 +0900
+
+    9p 끝
+
+[33mcommit 6b80e3d71319028ce70d4095ecb107e9f4d4ff1e[m[33m ([m[1;31morigin/master[m[33m, [m[1;32mmaster[m[33m)[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Wed Jul 23 17:56:07 2025 +0900
+
+    5.p Siamese 차례
+
+[33mcommit 249ad018c16979d65835b20214a7cff21c42e0cb[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Wed Jul 23 16:09:20 2025 +0900
+
+    9p 끝
+
+[33mcommit dc285db4806680117ec2f7cdc2f406202267e4b2[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Mon Jul 21 17:38:24 2025 +0900
+
+    논문 코드
+
+[33mcommit 9709b3c9ba07d4fdd7d39bd1ce53726b7bcc4434[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Mon Jul 21 11:18:14 2025 +0900
+
+    first commit
+
+[33mcommit f6c179375cf8d80c0f4f818ff724a72692def009[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 17 09:53:06 2025 +0900
+
+    삭제
+
+[33mcommit 38b8021888cb3ae5c504c0ecaab9572e407182f5[m
+Merge: 33a47d7 2208488
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 17 09:45:25 2025 +0900
+
+    Merge branch 'main' of https://github.com/hsiemanym/my_project into main
+
+[33mcommit 33a47d7c125434d94cbd227c491c2c9837f65624[m
+Author: hsiemanym <hyfrom2024@gmail.com>
+Date:   Thu Jul 17 09:39:32 2025 +0900
+
+    main.py 강제로 추가
+
+[33mcommit 2208488dc9170633a3b55748af88450ed72635c5[m
+Author: 김회연 <kimhoeyeon@MacBook-Air-3.local>
+Date:   Wed Jul 16 23:28:07 2025 +0900
+
+    첫 커밋
