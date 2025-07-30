@@ -1,27 +1,28 @@
-
+# GPU 지정 및 경로 설정
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1" # GPU 1번 사용
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # sys.path에 상위 디렉토리를 추가하여 모듈 임포트 경로 설정
 
 # main.py
 
-import yaml
+# 라이브러리 임포트 (pytorch, 데이터 처리 등)
+import yaml # 환경설정
 import argparse
 import torch
-from torchvision import transforms
+from torchvision import transforms # 이미지 변환
 from PIL import Image, ImageDraw, ImageFont
 import torch.nn.functional as F
 
+# Rabbit1 모델 및 유틸 모듈 import
 from utils.similarity_utils import compute_counterfactual_score
-from models.backbone import SimSiamBackbone
-from features.embeddings import compute_embedding
+from models.backbone import SimSiamBackbone # ResNet-50 기반 네트워크 백본 클래스
+from features.embeddings import compute_embedding # 이미지를 받아 백본 모델의 임베딩 출력을 얻는 함수
 from features.generic_feature_bank import build_gfb
 from models.gradcam import GradCAM
 from utils.image_utils import (
-    load_and_preprocess_image,
+    load_and_preprocess_image, # 이미지 로드 및 전처리
     overlay_heatmap,
     assemble_2x2_grid,
     save_image
@@ -29,15 +30,18 @@ from utils.image_utils import (
 
 from sklearn.metrics.pairwise import cosine_similarity
 
-
+# main.py 설정 로드 및 디바이스 설정
 def load_config():
     with open("config.yml", "r") as f:
         return yaml.safe_load(f)
 
 
 def extract_reference_embeddings(model, config, transform):
-    image_dir = config['data']['reference_dir']
+    # main.py 참조(reference) 이미지 임베딩 불러오기
+    image_dir = config['data']['reference_dir']        # e.g., "data/rabbits" 참조 이미지 폴더 지정
     save_path = config['features']['embedding_cache']
+    # e.g., "features/embeddings.pth" 임베딩 캐시 로드 (키=파일명, 값=해당 이미지의 256차원 임베딩 텐서)
+    # extract_features.py를 통해 모든 기준 이미지의 임베딩을 한 번에 계산/저장해두고 활용 - 매 테스트마다 기준 이미지를 일일이 모델에 넣지 않고 바로 임베딩 비교 (속도 up)
 
     embeddings = {}
     for fname in sorted(os.listdir(image_dir)):
@@ -67,8 +71,22 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # --------------------------
     # 1. Model & Transform
     # --------------------------
-    model = SimSiamBackbone(pretrained=True).to(device)
-    model.eval()
+    model = SimSiamBackbone(pretrained=True).to(device)  # 사전학습된 SimSiam 백본 모델 초기화
+    '''
+    Grad_CAM_Siamese 원본의 시암쌍 네트워크에서 파생되었지만 
+        (원본 모델의 SiameseNetwork는 ResNet-50 기반 양분망으로 두 입력 이미지 각각을 Conv 통과 
+        -> FC 통해 2차원 출력(거리 및 유사도 확률)을 산출
+        contrastive Loss 학습을 위해 output이 sigmoid로 "같은/다른 클래스" 확률을 내는 구조였음)
+        
+    두 이미지 입력 대산 단일 이미지 임베딩 추출용으로 사용
+    (원본 모델은 두 이미지를 받아 거리(Dw)와 시밀러리티(sigmoid 출력)를 내놓았으나,
+    Rabbit1에서는 마지막 시밀러리티 예측 레이어를 제외하고 256차원 임베딩 추출까지만 사용 = 모델을 특징 추출기(feature extractor)로 활용) 
+        (Rabbit1에서는 모든 이미지가 한 클래스(토끼)로, 대조학습이 불필요
+        FC 출력층과 contrastive 손실 부분은 제거하고 256차원 임베딩만 재사용 - 두 이미지의 임베딩 사이 코사인 유사도를 계산하는 방식으로 전환)
+    -> 모델 forward를 한 이미지씩 호출 - 결과 임베딩을 가지고 별도로 유사도를 구함
+    '''
+    model.eval() # 평가모드로 전환
+
     transform = transforms.Compose([
         transforms.Resize(config['image']['size']),
         transforms.ToTensor(),

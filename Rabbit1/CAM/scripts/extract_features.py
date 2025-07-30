@@ -61,11 +61,12 @@ for fname in tqdm(image_files, desc="Extracting embeddings"):
 
     with torch.no_grad():
         embedding = compute_embedding(model, image)  # [1, 256]
+        # ResNet 백본(SimSiamBackbone)에 각 이미지를 통과시켜 임베딩을 얻음
         embeddings[fname] = embedding.squeeze(0).cpu()  # save as [256]
 
 # ----------------------------
 # Save
 # ----------------------------
 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-torch.save(embeddings, save_path)
+torch.save(embeddings, save_path) # 사전에 임베딩 저장
 print(f"Saved {len(embeddings)} embeddings to {save_path}")

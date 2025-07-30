@@ -1,0 +1,72 @@
+{
+  "ears": [
+    "long upright ears",
+    "one floppy ear",
+    "both ears drooping",
+    "one ear folded",
+    "fluffy long ears",
+    "round short ears",
+    " "
+  ],
+  "mouth_nose": [
+    "prominent buck teeth",
+    "V-shaped mouth",
+    "tiny nose and whiskers",
+    "twitching nose",
+    "chubby cheeks with smile",
+    " "
+  ],
+  "eyes": [
+    "large wide eyes",
+    "curious round eyes",
+    "narrow sly eyes",
+    "sleepy half-closed eyes",
+    "sparkling baby-like eyes",
+    " "
+  ],
+
+  "accessory": [
+    "holding a carrot",
+    "biting a clover leaf",
+    " "
+  ],
+  "personality": [
+    "sly",
+    "clumsy",
+    "gentle",
+    "timid",
+    "curious",
+    "confident",
+    "mischievous",
+    "innocent",
+    "anxious",
+    "adorable",
+    " "
+  ],
+  "style_feature": [
+    "with pinky toe beans on feet",
+    "fluffy tail showing",
+    "round baby face",
+    "eyelashes like a doll",
+    "head bigger than body",
+    "blush on cheeks",
+    " "
+  ],
+  "color": [
+    "white color body",
+    "pastel color body",
+    "pink color body",
+    " "
+  ],
+  "styles": [
+    "2D style",
+    "storybook style",
+    "logo style",
+    "cartoon style",
+    "webtoon style",
+    "3D style",
+    "pixar style",
+    "disney style",
+    " "
+  ]
+}
