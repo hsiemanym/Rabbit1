@@ -1,29 +1,31 @@
 # GPU 지정 및 경로 설정
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1" # GPU 1번 사용
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # GPU 1번 사용
 
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # sys.path에 상위 디렉토리를 추가하여 모듈 임포트 경로 설정
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))  # sys.path에 상위 디렉토리를 추가하여 모듈 임포트 경로 설정
 
 # main.py
 
 # 라이브러리 임포트 (pytorch, 데이터 처리 등)
-import yaml # 환경설정
+import yaml  # 환경설정
 import argparse
 import torch
-from torchvision import transforms # 이미지 변환
+from torchvision import transforms  # 이미지 변환
 from PIL import Image, ImageDraw, ImageFont
 import torch.nn.functional as F
 
 # Rabbit1 모델 및 유틸 모듈 import
 from utils.similarity_utils import compute_counterfactual_score
-from models.backbone import SimSiamBackbone # ResNet-50 기반 네트워크 백본 클래스
-from features.embeddings import compute_embedding # 이미지를 받아 백본 모델의 임베딩 출력을 얻는 함수
+from models.backbone import SimSiamBackbone  # ResNet-50 기반 네트워크 백본 클래스
+from features.embeddings import compute_embedding  # 이미지를 받아 백본 모델의 임베딩 출력을 얻는 함수
 from features.generic_feature_bank import build_gfb
 from models.gradcam import GradCAM
 
 from utils.image_utils import (
-    load_and_preprocess_image, # 이미지 로드 및 전처리
+    load_and_preprocess_image,  # 이미지 로드 및 전처리
     overlay_heatmap,
     assemble_2x2_grid,
     save_image
@@ -40,7 +42,7 @@ def load_config():
 
 def extract_reference_embeddings(model, config, transform):
     # main.py 참조(reference) 이미지 임베딩 불러오기
-    image_dir = config['data']['reference_dir']        # e.g., "data/rabbits" 참조 이미지 폴더 지정
+    image_dir = config['data']['reference_dir']  # e.g., "data/rabbits" 참조 이미지 폴더 지정
     save_path = config['features']['embedding_cache']
     # e.g., "features/embeddings.pth" 임베딩 캐시 로드 (키=파일명, 값=해당 이미지의 256차원 임베딩 텐서)
     # extract_features.py를 통해 모든 기준 이미지의 임베딩을 한 번에 계산/저장해두고 활용 - 매 테스트마다 기준 이미지를 일일이 모델에 넣지 않고 바로 임베딩 비교 (속도 up)
@@ -105,7 +107,6 @@ def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, tra
     return best_name, best_score
 
 
-
 def run_pipeline(test_img_path, gfb_option='A'):
     config = load_config()
 
@@ -118,7 +119,7 @@ def run_pipeline(test_img_path, gfb_option='A'):
         (원본 모델의 SiameseNetwork는 ResNet-50 기반 양분망으로 두 입력 이미지 각각을 Conv 통과 
         -> FC 통해 2차원 출력(거리 및 유사도 확률)을 산출
         contrastive Loss 학습을 위해 output이 sigmoid로 "같은/다른 클래스" 확률을 내는 구조였음)
-        
+
     두 이미지 입력 대산 단일 이미지 임베딩 추출용으로 사용
     (원본 모델은 두 이미지를 받아 거리(Dw)와 시밀러리티(sigmoid 출력)를 내놓았으나,
     Rabbit1에서는 마지막 시밀러리티 예측 레이어를 제외하고 256차원 임베딩 추출까지만 사용 = 모델을 특징 추출기(feature extractor)로 활용) 
@@ -126,7 +127,7 @@ def run_pipeline(test_img_path, gfb_option='A'):
         FC 출력층과 contrastive 손실 부분은 제거하고 256차원 임베딩만 재사용 - 두 이미지의 임베딩 사이 코사인 유사도를 계산하는 방식으로 전환)
     -> 모델 forward를 한 이미지씩 호출 - 결과 임베딩을 가지고 별도로 유사도를 구함
     '''
-    model.eval() # 평가모드로 전환
+    model.eval()  # 평가모드로 전환
 
     transform = transforms.Compose([
         transforms.Resize(config['image']['size']),
@@ -171,7 +172,7 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # 5. Grad-CAM + GFB 시각화
     # --------------------------
     gradcam = GradCAM(model, ['encoder.7'])
-    z_test = compute_embedding(model, img_test, no_grad=False) # for Grad-CAM
+    z_test = compute_embedding(model, img_test, no_grad=False)  # for Grad-CAM
     z_ref = compute_embedding(model, img_ref, no_grad=True)
 
     # 1. Grad-CAM 추출
@@ -219,21 +220,11 @@ def run_pipeline(test_img_path, gfb_option='A'):
         return filter_with_gfb(cam, fmap, gfb_tensor)
 
     # Grad-CAM 맵 (기존 방식 유지)
-    '''
     gradcam = GradCAM(model, ['encoder.7'])
     feat_test = model.get_feature_map(img_test)
     feat_ref = model.get_feature_map(img_ref)
     z_test = compute_embedding(model, img_test, no_grad=False)
     z_ref = compute_embedding(model, img_ref, no_grad=False)
-    '''
-    feat_test = model.forward_backbone(img_test)
-    pooled_test = F.adaptive_avg_pool2d(feat_test, (1, 1)).view(1, -1).requires_grad_()
-    z_test = model.projector(pooled_test)
-
-    feat_ref = model.forward_backbone(img_ref)
-    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1).requires_grad_()
-    z_ref = model.projector(pooled_ref)
-    # --------------------------------------------------------
 
     cam1 = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
     cam2 = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
@@ -252,33 +243,9 @@ def run_pipeline(test_img_path, gfb_option='A'):
     fmap_test = model.get_feature_map(img_test).squeeze(0)
     fmap_ref = model.get_feature_map(img_ref).squeeze(0)
 
-    ''''# ---------- 1. GFB 없이 Grad-CAM만 ---------- #
+    # ---------- 1. GFB 없이 Grad-CAM만 ---------- #
     cam0_test = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
     cam0_ref = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
-    '''
-    # ---------- 1. GFB 없이 Grad-CAM만 (수정) ---------- #
-    # Grad-CAM을 위한 입력 준비 (test)
-    feat_test = model.forward_backbone(img_test)  # [1, 2048, H, W]
-    pooled_test = F.adaptive_avg_pool2d(feat_test, (1, 1))  # [1, 2048, 1, 1]
-    pooled_test = pooled_test.view(pooled_test.size(0), -1)  # [1, 2048]
-    pooled_test.requires_grad_()
-    z_test = model.projector(pooled_test)  # [1, 256]
-    # ----------------------------------------------------
-
-    # Grad-CAM을 위한 입력 준비 (ref)
-    feat_ref = model.forward_backbone(img_ref)
-    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1)
-    pooled_ref.requires_grad_()
-    z_ref = model.projector(pooled_ref)
-
-    # Grad-CAM for test (factual - no GFB)
-    score_test = F.cosine_similarity(z_test, z_ref.detach(), dim=1).sum()
-    cam0_test = gradcam.generate(img_test, score_test)[0]
-    # Grad-CAM for ref (factual - no GFB)
-    score_ref = F.cosine_similarity(z_ref, z_test.detach(), dim=1).sum()
-    cam0_ref = gradcam.generate(img_ref, score_ref)[0]
-   # ---------------------------------------------------
-
     vis0 = overlay_heatmap(raw_test, cam0_test)
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
 
@@ -291,32 +258,10 @@ def run_pipeline(test_img_path, gfb_option='A'):
     vis3 = overlay_heatmap(raw_ref, cam2)
 
     # ---------- 3. counterfactual ---------- #
-    # ---------- 3. counterfactual (수정) ---------- #
-
-    # test 기준
-    feat_test_cf = model.forward_backbone(img_test)
-    pooled_test_cf = F.adaptive_avg_pool2d(feat_test_cf, (1, 1)).view(1, -1).requires_grad_()
-    z_test_cf = model.projector(pooled_test_cf)
-
-    feat_ref_cf = model.forward_backbone(img_ref)
-    pooled_ref_cf = F.adaptive_avg_pool2d(feat_ref_cf, (1, 1)).view(1, -1).detach()
-    z_ref_cf = model.projector(pooled_ref_cf)
-
-    score_cf_test = (1.0 - F.cosine_similarity(z_test_cf, z_ref_cf, dim=1)).sum()
-    cam3 = gradcam.generate(img_test, score_cf_test)[0]
-
-    # ref 기준
-    feat_ref_cf = model.forward_backbone(img_ref)
-    pooled_ref_cf = F.adaptive_avg_pool2d(feat_ref_cf, (1, 1)).view(1, -1).requires_grad_()
-    z_ref_cf = model.projector(pooled_ref_cf)
-
-    feat_test_cf = model.forward_backbone(img_test)
-    pooled_test_cf = F.adaptive_avg_pool2d(feat_test_cf, (1, 1)).view(1, -1).detach()
-    z_test_cf = model.projector(pooled_test_cf)
-
-    score_cf_ref = (1.0 - F.cosine_similarity(z_ref_cf, z_test_cf, dim=1)).sum()
-    cam4 = gradcam.generate(img_ref, score_cf_ref)[0]
-
+    inv_emb_test = -model.projector(emb_test.to(device))
+    inv_emb_ref = -model.projector(emb_ref.to(device))
+    cam3 = get_masked_cam(img_test, inv_emb_ref, fmap_test)
+    cam4 = get_masked_cam(img_ref, inv_emb_test, fmap_ref)
     vis4 = overlay_heatmap(raw_test, cam3)
     vis5 = overlay_heatmap(raw_ref, cam4)
 
@@ -333,8 +278,9 @@ def run_pipeline(test_img_path, gfb_option='A'):
 
     os.makedirs('output', exist_ok=True)
     fname = os.path.splitext(os.path.basename(test_img_path))[0]
-    save_image(grid, f'output/main_{fname}_explanation_full.png')
-    print(f"[✓] Saved 2x3 explanation to output/main_{fname}_explanation_full.png")
+    save_image(grid, f'output/main1_{fname}_explanation_full.png')
+    print(f"[✓] Saved 2x3 explanation to output/main1_{fname}_explanation_full.png")
+
 
 def generate_gradcam_heatmap(model, gradcam, input_tensor, target_tensor):
     """
@@ -360,16 +306,16 @@ def filter_with_gfb(heatmap, fmap, gfb, threshold=0.7):
             if sims.max() < threshold:
                 mask[y, x] = 1.0
             '''
-            #----------------------------------
+            # ----------------------------------
             sims = F.cosine_similarity(patch.unsqueeze(0), gfb)  # [N]
             topk = torch.topk(sims, k=5).values  # 상위 5개 유사도
             if topk.mean() < threshold:
                 mask[y, x] = 1.0
-            #----------------------------------
+            # ----------------------------------
 
     #  업샘플링 (heatmap 크기와 일치시키기)
     mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=heatmap.shape, mode='bilinear',
-                                           align_corners=False)
+                         align_corners=False)
     mask = mask.squeeze().cpu().numpy()
 
     return heatmap * mask
@@ -383,3 +329,4 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_pipeline(args.test_img, args.gfb_option)
+
