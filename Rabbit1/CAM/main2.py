@@ -48,13 +48,51 @@ def extract_reference_embeddings(model, config, transform):
     return embeddings
 
 
-def retrieve_top1(test_emb, reference_dict):
+def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, transform):
+    """
+    SimSiam cosine similarity top-5 → 그 중 CLIPScore 최고 후보 반환
+    """
+    from utils.image_utils import save_image
+    import clip
+    from PIL import Image
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    clip_model, preprocess = clip.load("ViT-B/32", device=device)
+    clip_model.eval()
+
     names = list(reference_dict.keys())
     mat = torch.stack([reference_dict[n] for n in names])
-    test_np = test_emb.view(1, -1).cpu().numpy()  # ensure 2D
-    sims = cosine_similarity(test_np, mat.numpy())
-    idx = sims.argmax()
-    return names[idx], sims[0, idx]
+    test_img = load_and_preprocess_image(test_img_path, transform).unsqueeze(0).to(device)
+    test_emb = compute_embedding(model, test_img, no_grad=True)
+
+    sims = cosine_similarity(test_emb.cpu().numpy(), mat.numpy())  # [1, N]
+    idxs = sims[0].argsort()[::-1][:5]
+    top5_names = [names[i] for i in idxs]
+
+    def clip_score(img1_path, img2_path):
+        image1 = preprocess(Image.open(img1_path)).unsqueeze(0).to(device)
+        image2 = preprocess(Image.open(img2_path)).unsqueeze(0).to(device)
+        with torch.no_grad():
+            emb1 = clip_model.encode_image(image1).float()
+            emb2 = clip_model.encode_image(image2).float()
+            emb1 = emb1 / emb1.norm(dim=-1, keepdim=True)
+            emb2 = emb2 / emb2.norm(dim=-1, keepdim=True)
+        return (emb1 * emb2).sum().item()
+
+    best_score = -1
+    best_name = None
+    test_img_abs = os.path.abspath(test_img_path)
+    ref_dir = config['data']['reference_dir']
+
+    for name in top5_names:
+        ref_path = os.path.join(ref_dir, name)
+        score = clip_score(test_img_abs, ref_path)
+        if score > best_score:
+            best_score = score
+            best_name = name
+
+    return best_name, best_score
+
 
 
 def run_pipeline(test_img_path, gfb_option='A'):
@@ -80,12 +118,12 @@ def run_pipeline(test_img_path, gfb_option='A'):
     gfb_tensor = build_gfb(patch_file, save_path=gfb_path, option=gfb_option).to(device)
 
     img_test = load_and_preprocess_image(test_img_path, transform).unsqueeze(0).to(device)
-    emb_test = model.get_embedding_nograd(img_test)
-    top1_name, sim_score = retrieve_top1(emb_test, reference_embeddings)
+    emb_test = compute_embedding(model, img_test, no_grad=True)
+    top1_name, sim_score = retrieve_top1_clipfiltered(test_img_path, model, reference_embeddings, config, transform)
 
     top1_path = os.path.join(config['data']['reference_dir'], top1_name)
     img_ref = load_and_preprocess_image(top1_path, transform).unsqueeze(0).to(device)
-    emb_ref = model.get_embedding_nograd(img_ref)
+    emb_ref = compute_embedding(model, img_ref, no_grad=True)
 
     print(f"[✓] Top-1 for {os.path.basename(test_img_path)} → {top1_name}  ({sim_score:.4f})")
 
@@ -114,11 +152,14 @@ def run_pipeline(test_img_path, gfb_option='A'):
     def get_masked_cam(img_tensor, target_tensor, fmap):
         feat = model.forward_backbone(img_tensor)
         pooled = F.adaptive_avg_pool2d(feat, (1, 1)).flatten(1)
+
         pooled.requires_grad_(True)
         z1 = model.projector(pooled)
-        z2 = target_tensor.detach()
+        z2 = model.projector(target_tensor.detach())
+
         sim = F.cosine_similarity(z1, z2, dim=1).sum()
         cam = gradcam.generate(img_tensor, sim)[0]
+
         return filter_with_gfb(cam, fmap, gfb_tensor)
 
     cam1 = get_masked_cam(img_test, emb_ref, fmap_test)
@@ -142,8 +183,8 @@ def run_pipeline(test_img_path, gfb_option='A'):
     grid = assemble_2x2_grid([vis0, vis1, vis2, vis3, vis4, vis5], labels=labels, rows=3, cols=2)
     os.makedirs('output', exist_ok=True)
     fname = os.path.splitext(os.path.basename(test_img_path))[0]
-    save_image(grid, f'output/{fname}_explanation_full.png')
-    print(f"[✓] Saved 2x3 explanation to output/{fname}_explanation_full.png")
+    save_image(grid, f'output/main2_{fname}_explanation_full.png')
+    print(f"[✓] Saved 2x3 explanation to output/main2_{fname}_explanation_full.png")
 
 
 def filter_with_gfb(heatmap, fmap, gfb, threshold=0.7):

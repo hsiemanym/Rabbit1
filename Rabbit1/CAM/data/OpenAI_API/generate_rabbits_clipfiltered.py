@@ -48,7 +48,7 @@ def generate_prompt(attributes):
     return prompt
 
 # CLIPScore filter
-def is_semantically_valid(image_path, processor, model, device, caption, threshold=0.32):
+def is_semantically_valid(image_path, processor, model, device, caption, threshold=0.31):
     image = Image.open(image_path).convert("RGB").resize((512, 512))
 
     # 긍정 텍스트 임베딩
@@ -81,9 +81,10 @@ def is_semantically_valid(image_path, processor, model, device, caption, thresho
             neg_text_features = model.get_text_features(**neg_text_input)
             neg_text_features = neg_text_features / neg_text_features.norm(dim=-1, keepdim=True)
 
+            trshd = 0.286
             neg_score = torch.matmul(image_features, neg_text_features.T).item()
-            if neg_score > 0.40:  # cosine similarity 기준
-                print(f"❌ Detected negative concept: '{neg_caption}' ({neg_score:.3f} > 0.40)")
+            if neg_score > trshd:  # cosine similarity 기준
+                print(f"❌ Detected negative concept: '{neg_caption}' ({neg_score:.3f} > {trshd:.3f})")
                 return False
 
     return True
@@ -122,7 +123,7 @@ def generate_batch(total_images=100):
         if prompt in used_prompts:
             continue
         used_prompts.add(prompt)
-        filename = os.path.join(output_dir, f"rabbit_{i+1:03}.png")
+        filename = os.path.join(output_dir, f"rabbit_{i+141:03}.png")
         print(f"[{i+1}/{total_images}] Generating image: {filename}")
         success = generate_image_with_clipscore(prompt, filename)
         if not success:

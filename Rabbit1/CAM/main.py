@@ -21,6 +21,7 @@ from models.backbone import SimSiamBackbone # ResNet-50 기반 네트워크 백�
 from features.embeddings import compute_embedding # 이미지를 받아 백본 모델의 임베딩 출력을 얻는 함수
 from features.generic_feature_bank import build_gfb
 from models.gradcam import GradCAM
+
 from utils.image_utils import (
     load_and_preprocess_image, # 이미지 로드 및 전처리
     overlay_heatmap,
@@ -29,6 +30,7 @@ from utils.image_utils import (
 )
 
 from sklearn.metrics.pairwise import cosine_similarity
+
 
 # main.py 설정 로드 및 디바이스 설정
 def load_config():
@@ -57,12 +59,51 @@ def extract_reference_embeddings(model, config, transform):
     return embeddings
 
 
-def retrieve_top1(test_emb, reference_dict):
+def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, transform):
+    """
+    SimSiam cosine similarity top-5 → 그 중 CLIPScore 최고 후보 반환
+    """
+    from utils.image_utils import save_image
+    import clip
+    from PIL import Image
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    clip_model, preprocess = clip.load("ViT-B/32", device=device)
+    clip_model.eval()
+
     names = list(reference_dict.keys())
     mat = torch.stack([reference_dict[n] for n in names])
+    test_img = load_and_preprocess_image(test_img_path, transform).unsqueeze(0).to(device)
+    test_emb = compute_embedding(model, test_img, no_grad=True)
+
     sims = cosine_similarity(test_emb.cpu().numpy(), mat.numpy())  # [1, N]
-    idx = sims.argmax()
-    return names[idx], sims[0, idx]
+    idxs = sims[0].argsort()[::-1][:5]
+    top5_names = [names[i] for i in idxs]
+
+    def clip_score(img1_path, img2_path):
+        image1 = preprocess(Image.open(img1_path)).unsqueeze(0).to(device)
+        image2 = preprocess(Image.open(img2_path)).unsqueeze(0).to(device)
+        with torch.no_grad():
+            emb1 = clip_model.encode_image(image1).float()
+            emb2 = clip_model.encode_image(image2).float()
+            emb1 = emb1 / emb1.norm(dim=-1, keepdim=True)
+            emb2 = emb2 / emb2.norm(dim=-1, keepdim=True)
+        return (emb1 * emb2).sum().item()
+
+    best_score = -1
+    best_name = None
+    test_img_abs = os.path.abspath(test_img_path)
+    ref_dir = config['data']['reference_dir']
+
+    for name in top5_names:
+        ref_path = os.path.join(ref_dir, name)
+        score = clip_score(test_img_abs, ref_path)
+        if score > best_score:
+            best_score = score
+            best_name = name
+
+    return best_name, best_score
+
 
 
 def run_pipeline(test_img_path, gfb_option='A'):
@@ -117,12 +158,12 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # 4. Retrieve Top-1
     # --------------------------
     img_test = load_and_preprocess_image(test_img_path, transform).unsqueeze(0).to(device)
-    emb_test = model.get_embedding_nograd(img_test)  # retrieval only
-    top1_name, sim_score = retrieve_top1(emb_test, reference_embeddings)
+    emb_test = compute_embedding(model, img_test, no_grad=True)  # retrieval only
+    top1_name, sim_score = retrieve_top1_clipfiltered(test_img_path, model, reference_embeddings, config, transform)
 
     top1_path = os.path.join(config['data']['reference_dir'], top1_name)
     img_ref = load_and_preprocess_image(top1_path, transform).unsqueeze(0).to(device)
-    emb_ref = model.get_embedding_nograd(img_ref)
+    emb_ref = compute_embedding(model, img_ref, no_grad=True)
 
     print(f"[✓] Top-1 for {os.path.basename(test_img_path)} → {top1_name}  ({sim_score:.4f})")
 
@@ -130,8 +171,8 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # 5. Grad-CAM + GFB 시각화
     # --------------------------
     gradcam = GradCAM(model, ['encoder.7'])
-    z_test = model.get_embedding(img_test)  # for Grad-CAM
-    z_ref = model.get_embedding(img_ref)
+    z_test = compute_embedding(model, img_test, no_grad=False) # for Grad-CAM
+    z_ref = compute_embedding(model, img_ref, no_grad=True)
 
     # 1. Grad-CAM 추출
     cam_test = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
@@ -157,23 +198,20 @@ def run_pipeline(test_img_path, gfb_option='A'):
     cam4 = cam_ref * cf_mask2_up.cpu().numpy()
 
     def get_masked_cam(query_tensor, target_tensor, fmap):
-        #  query_tensor.requires_grad = True
-
-        # 1. backbone → feature map → projection까지 그대로
-        feat = model.forward_backbone(query_tensor)  # [1, C, H, W]
-
-        pooled = torch.nn.functional.adaptive_avg_pool2d(feat, (1, 1))  # [1, 2048, 1, 1]
+        # 1. backbone → feature map → projection
+        feat = model.forward_backbone(query_tensor)  # [1, 2048, H, W]
+        pooled = F.adaptive_avg_pool2d(feat, (1, 1))  # [1, 2048, 1, 1]
         pooled = pooled.view(pooled.size(0), -1)  # [1, 2048]
         pooled.requires_grad_(True)
 
-        z1 = model.projector(pooled)  # [1, D]
-        z2 = target_tensor.detach()  # Grad 없이 사용
+        z1 = model.projector(pooled)  # [1, 256]
+        z2 = target_tensor.detach()  # [1, 256] projection-based target
 
-        # 2. cosine similarity (backward 연결됨)
-        sim = torch.nn.functional.cosine_similarity(z1, z2, dim=1)  # [1]
-        target_score = sim.sum()  # scalar
+        # 2. cosine similarity
+        sim = F.cosine_similarity(z1, z2, dim=1)  # [1]
+        target_score = sim.sum()
 
-        # 3. Grad-CAM → feature importance
+        # 3. Grad-CAM
         cam = gradcam.generate(query_tensor, target_score)[0]
 
         # 4. GFB 마스킹
@@ -210,14 +248,16 @@ def run_pipeline(test_img_path, gfb_option='A'):
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
 
     # ---------- 2. factual (GFB 필터 적용) ---------- #
-    cam1 = get_masked_cam(img_test, emb_ref, fmap_test)
-    cam2 = get_masked_cam(img_ref, emb_test, fmap_ref)
+    emb_ref_proj = model.projector(emb_ref.to(device))  # [1, 256]
+    cam1 = get_masked_cam(img_test, emb_ref_proj, fmap_test)
+    emb_test_proj = model.projector(emb_test.to(device))  # [1, 256]
+    cam2 = get_masked_cam(img_ref, emb_test_proj, fmap_ref)
     vis2 = overlay_heatmap(raw_test, cam1)
     vis3 = overlay_heatmap(raw_ref, cam2)
 
     # ---------- 3. counterfactual ---------- #
-    inv_emb_test = -emb_test
-    inv_emb_ref = -emb_ref
+    inv_emb_test = -model.projector(emb_test.to(device))
+    inv_emb_ref = -model.projector(emb_ref.to(device))
     cam3 = get_masked_cam(img_test, inv_emb_ref, fmap_test)
     cam4 = get_masked_cam(img_ref, inv_emb_test, fmap_ref)
     vis4 = overlay_heatmap(raw_test, cam3)
@@ -236,8 +276,8 @@ def run_pipeline(test_img_path, gfb_option='A'):
 
     os.makedirs('output', exist_ok=True)
     fname = os.path.splitext(os.path.basename(test_img_path))[0]
-    save_image(grid, f'output/{fname}_explanation_full.png')
-    print(f"[✓] Saved 2x3 explanation to output/{fname}_explanation_full.png")
+    save_image(grid, f'output/main_{fname}_explanation_full.png')
+    print(f"[✓] Saved 2x3 explanation to output/main_{fname}_explanation_full.png")
 
 def generate_gradcam_heatmap(model, gradcam, input_tensor, target_tensor):
     """

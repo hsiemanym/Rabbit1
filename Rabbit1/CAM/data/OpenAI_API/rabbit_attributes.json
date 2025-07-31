@@ -1,12 +1,10 @@
 {
   "ears": [
-    "long upright ears",
     "one floppy ear",
     "both ears drooping",
     "one ear folded",
     "fluffy long ears",
-    "round short ears",
-    " "
+    "round short ears"
   ],
   "mouth_nose": [
     "prominent buck teeth",
@@ -27,7 +25,9 @@
 
   "accessory": [
     "holding a carrot",
-    "biting a clover leaf",
+    "with a bush",
+    " ",
+    " ",
     " "
   ],
   "personality": [
@@ -56,6 +56,9 @@
     "white color body",
     "pastel color body",
     "pink color body",
+    "with colors",
+    "with colors",
+    "with colors",
     " "
   ],
   "styles": [

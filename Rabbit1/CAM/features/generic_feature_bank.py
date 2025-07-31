@@ -11,7 +11,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans, DBSCAN
 
-def build_gfb(patch_file, save_path, option='A', threshold=0.9, min_count=10, method='kmeans', n_clusters=20):
+def build_gfb(patch_file, save_path, option='A', threshold=0.7, min_count=17, method='kmeans', n_clusters=20):
     assert os.path.exists(patch_file), f"{patch_file} not found."
     patch_data = torch.load(patch_file)  # [N, D] or dict
 

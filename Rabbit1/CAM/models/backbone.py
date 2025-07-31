@@ -95,6 +95,11 @@ class SimSiamBackbone(nn.Module):
         z = self.projection_head(pooled)
         return z
 
+    def get_gap_embedding(self, x):
+        feats = self.encoder(x)
+        pooled = self.pool(feats).flatten(1)  # GAP 출력
+        return pooled
+
     def get_embedding_nograd(self, x):
         with torch.no_grad():
             return self.get_embedding(x)

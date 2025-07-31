@@ -35,3 +35,11 @@ gfb:
 # 시각화 출력
 # ------------------------
 output_dir: output
+
+
+paths:
+  reference_images: ./data/rabbits
+  test_images: ./data/test
+  gfb_path: ./features/generic_bank/generic_feature_bank.pth
+  embedding_path: ./features/embeddings.pth
+

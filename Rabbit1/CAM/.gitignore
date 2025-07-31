@@ -1,1 +1,13 @@
 *.pth
+
+__pycache__/
+*.pyc
+
+.env
+*.env
+**/.env
+
+.vscode/
+.idea/
+
+.DS_Store

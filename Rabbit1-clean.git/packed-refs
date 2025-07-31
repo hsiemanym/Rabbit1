@@ -1,8 +1,0 @@
-# pack-refs with: peeled fully-peeled sorted 
-3de9e3335fa80e8f058c54db1885c221abe03deb refs/heads/gradcam
-41111ba017facd5f669e38fd64ebc99652be9e8a refs/heads/main
-6b80e3d71319028ce70d4095ecb107e9f4d4ff1e refs/heads/master
-41111ba017facd5f669e38fd64ebc99652be9e8a refs/remotes/origin/gradcam
-41111ba017facd5f669e38fd64ebc99652be9e8a refs/remotes/origin/main
-6b80e3d71319028ce70d4095ecb107e9f4d4ff1e refs/remotes/origin/master
-12d0644024c926321ca78fbb9353983f3b5cab87 refs/stash
