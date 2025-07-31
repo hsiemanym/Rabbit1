@@ -40,7 +40,7 @@ def generate_prompt(attributes):
     combo = {k: random.choice(v) for k, v in attributes.items()}
     prompt = (
         f"A single, directly facing forward in A-pose, typical character rabbit, full body and centered, "
-        f"with {combo['ears']}, {combo['mouth_nose']}, {combo['eyes']}, {combo['accessory']}, {combo['styles']}, "
+        f"with {combo['ears']}, {combo['mouth_nose']}, {combo['eyes']}, {combo['accessory']},  {combo['color']}, {combo['styles']}, "
         f"showing {combo['style_feature']}, and a {combo['personality']} personality. "
         "The background is completely plain white, with no shadows, no props, no other objects, animals or characters. "
         "Character is isolated."
@@ -110,7 +110,7 @@ def generate_image_with_clipscore(prompt, filename, max_retries=3):
             if is_semantically_valid(filename, clip_processor, clip_model, device, caption=caption, threshold=0.28):
                 return True
             else:
-                print(f"❌ CLIPScore check failed. Retrying... ({attempt+1})")
+                print(f"CLIPScore check failed. Retrying... ({attempt+1})")
         except Exception as e:
             print(f"Error generating image: {e}")
     return False
@@ -123,7 +123,7 @@ def generate_batch(total_images=100):
         if prompt in used_prompts:
             continue
         used_prompts.add(prompt)
-        filename = os.path.join(output_dir, f"rabbit_{i+141:03}.png")
+        filename = os.path.join(output_dir, f"rabbit_{i+241:03}.png")
         print(f"[{i+1}/{total_images}] Generating image: {filename}")
         success = generate_image_with_clipscore(prompt, filename)
         if not success:
@@ -131,4 +131,4 @@ def generate_batch(total_images=100):
     print("✅ Done!")
 
 if __name__ == "__main__":
-    generate_batch(10)
+    generate_batch(50)
