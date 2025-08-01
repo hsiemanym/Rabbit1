@@ -221,9 +221,20 @@ def run_pipeline(test_img_path, gfb_option='A'):
     fmap_test = model.get_feature_map(img_test).squeeze(0)
     fmap_ref = model.get_feature_map(img_ref).squeeze(0)
 
-    # ---------- 1. GFB 없이 Grad-CAM만 ---------- #
-    cam0_test = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
-    cam0_ref = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
+    # ---------- 1. Factual (No GFB) Grad-CAM Only ---------- #
+
+    # [Test]
+    z_test_fg = model.get_embedding(img_test).requires_grad_()
+    z_ref_fg = model.get_embedding(img_ref).detach()
+    score_test_fg = F.cosine_similarity(z_test_fg, z_ref_fg, dim=1).sum()
+    cam0_test = gradcam.generate(img_test, score_test_fg)[0]
+
+    # [Ref]
+    z_ref_fg = model.get_embedding(img_ref).requires_grad_()
+    z_test_fg = model.get_embedding(img_test).detach()
+    score_ref_fg = F.cosine_similarity(z_ref_fg, z_test_fg, dim=1).sum()
+    cam0_ref = gradcam.generate(img_ref, score_ref_fg)[0]
+
     vis0 = overlay_heatmap(raw_test, cam0_test)
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
 
@@ -253,10 +264,7 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # Grad-CAM target으로 직접 projection feature를 선택해서
     # test에서 counterfactual한 patch 위치의 projection vector 하나를 선택해서 score로 씀
     with torch.no_grad():
-        cf_score_map = generate_patch_based_target(fmap_test, fmap_ref, gfb_tensor,
-                                                   threshold=config['gfb']['threshold'],
-                                                   gfb_chunk_size=32,
-                                                   ref_chunk_size=128)  # [H, W]
+        cf_score_map = target_weights
         max_y, max_x = torch.where(cf_score_map == cf_score_map.max())
         y, x = max_y[0].item(), max_x[0].item()
 
