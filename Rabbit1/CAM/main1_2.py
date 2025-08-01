@@ -223,17 +223,30 @@ def run_pipeline(test_img_path, gfb_option='A'):
 
     # ---------- 1. Factual (No GFB) Grad-CAM Only ---------- #
 
-    # [Test]
-    z_test_fg = model.get_embedding(img_test).requires_grad_()
-    z_ref_fg = model.get_embedding(img_ref).detach()
-    score_test_fg = F.cosine_similarity(z_test_fg, z_ref_fg, dim=1).sum()
+    # [Test → Ref]
+    z_test_fg_test = model.get_embedding(img_test).requires_grad_()
+    z_ref_fg_test = model.get_embedding(img_ref).detach()
+    score_test_fg = F.cosine_similarity(z_test_fg_test, z_ref_fg_test, dim=1).sum()
     cam0_test = gradcam.generate(img_test, score_test_fg)[0]
 
-    # [Ref]
-    z_ref_fg = model.get_embedding(img_ref).requires_grad_()
-    z_test_fg = model.get_embedding(img_test).detach()
-    score_ref_fg = F.cosine_similarity(z_ref_fg, z_test_fg, dim=1).sum()
-    cam0_ref = gradcam.generate(img_ref, score_ref_fg)[0]
+    # [Ref → Test]
+    ###########################################################
+    # z_ref_fg_ref = model.get_embedding(img_ref).requires_grad_()
+    #z_test_fg_ref = model.get_embedding(img_test).detach()
+    #score_ref_fg = F.cosine_similarity(z_ref_fg_ref, z_test_fg_ref, dim=1).sum()
+    #cam0_ref = gradcam.generate(img_ref, score_ref_fg)[0]
+    ############################################################
+    # Ref Grad-CAM 계산에서 정확한 경로를 지정하여 projector 포함
+    feat_ref = model.forward_backbone(img_ref)
+    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1).requires_grad_()
+    z_ref_proj = model.projector(pooled_ref)
+
+    feat_test = model.forward_backbone(img_test)
+    pooled_test = F.adaptive_avg_pool2d(feat_test, (1, 1)).view(1, -1).detach()
+    z_test_proj = model.projector(pooled_test)
+
+    score = F.cosine_similarity(z_ref_proj, z_test_proj, dim=1).sum()
+    cam0_ref = gradcam.generate(img_ref, score)[0]
 
     vis0 = overlay_heatmap(raw_test, cam0_test)
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
@@ -318,15 +331,27 @@ def run_pipeline(test_img_path, gfb_option='A'):
     print(f"[✓] Saved 2x3 explanation to output/main1_2_{fname}_explanation_full.png")
 
 
-def generate_gradcam_heatmap(model, gradcam, input_tensor, target_tensor):
+def generate_gradcam_heatmap(model, gradcam, input_tensor, target_tensor, emphasize=True):
     """
     Compute Grad-CAM heatmap given query and target tensor.
     Both must have gradient enabled (i.e., from get_embedding, not no_grad).
+
+    If emphasize=True, apply softmax-like nonlinear transformation to boost salient regions.
     """
-    # Cosine similarity with backward connection
+    # 1. Cosine similarity → scalar score
     sim = F.cosine_similarity(input_tensor, target_tensor, dim=1)  # [1]
     score = sim.sum()  # scalar
+
+    # 2. Grad-CAM heatmap
     cam = gradcam.generate(input_tensor=input_tensor, target_score=score)[0]  # numpy [H, W]
+
+    # 3. Emphasize salient regions using exp
+    if emphasize:
+        import numpy as np
+        cam = np.clip(cam, 0, None)  # 음수 제거
+        cam = np.exp(3 * cam)  # 3배 강화 후 exp
+        cam = cam / (np.max(cam) + 1e-8)  # 정규화
+
     return cam
 
 
@@ -374,4 +399,3 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_pipeline(args.test_img, args.gfb_option)
-
