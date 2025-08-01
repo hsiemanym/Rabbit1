@@ -1,9 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import json
 import random
 from openai import OpenAI
@@ -35,6 +31,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
+
 # Prompt generator
 def generate_prompt(attributes):
     combo = {k: random.choice(v) for k, v in attributes.items()}
@@ -46,6 +43,7 @@ def generate_prompt(attributes):
         "Character is isolated."
     )
     return prompt
+
 
 # CLIPScore filter
 def is_semantically_valid(image_path, processor, model, device, caption, threshold=0.31):
@@ -91,7 +89,7 @@ def is_semantically_valid(image_path, processor, model, device, caption, thresho
 
 
 # Image generation
-def generate_image_with_clipscore(prompt, filename, max_retries=3):
+def generate_image_with_clipscore(prompt, filename, max_retries=3, i=1):
     caption = "A single cute bunny character, A-pose, frontside, centered, full body, plain white background"
     for attempt in range(max_retries):
         try:
@@ -105,15 +103,19 @@ def generate_image_with_clipscore(prompt, filename, max_retries=3):
             image_data = response.data[0].b64_json
             image = Image.open(BytesIO(base64.b64decode(image_data)))
             image = image.resize((512, 512), resample=Image.LANCZOS)
-            image.save(filename)
+            fname = filename.replace(".png", f"_{attempt + 1}.png")  # Corrected this line
+            image.save(fname)
 
-            if is_semantically_valid(filename, clip_processor, clip_model, device, caption=caption, threshold=0.28):
-                return True
+            if is_semantically_valid(fname, clip_processor, clip_model, device, caption=caption, threshold=0.28):
+                return [True, fname]
             else:
-                print(f"CLIPScore check failed. Retrying... ({attempt+1})")
+                print(f"CLIPScore check failed. Retrying... ({attempt + 1})")
+
         except Exception as e:
             print(f"Error generating image: {e}")
-    return False
+
+    return [False, fname]  # In case of failure, return False and filename
+
 
 # Batch run
 def generate_batch(total_images=100):
@@ -123,12 +125,13 @@ def generate_batch(total_images=100):
         if prompt in used_prompts:
             continue
         used_prompts.add(prompt)
-        filename = os.path.join(output_dir, f"rabbit_{i+241:03}.png")
-        print(f"[{i+1}/{total_images}] Generating image: {filename}")
-        success = generate_image_with_clipscore(prompt, filename)
+        fname = os.path.join(output_dir, f"rabbit_{i + 400:03}.png")
+        success, generated_fname = generate_image_with_clipscore(prompt, fname)
+        print(f"[{i + 1}/{total_images}] Generating image: {generated_fname}")
         if not success:
-            print(f"⚠️ Failed to generate valid image for: {filename}")
+            print(f"⚠️ Failed to generate valid image for: {generated_fname}")
     print("✅ Done!")
 
+
 if __name__ == "__main__":
-    generate_batch(50)
+    generate_batch(100)

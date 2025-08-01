@@ -82,7 +82,6 @@ def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, tra
     """
     SimSiam cosine similarity top-5 → 그 중 CLIPScore 최고 후보 반환
     """
-    from utils.image_utils import save_image
     import clip
     from PIL import Image
 
@@ -189,32 +188,7 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # 5. Grad-CAM + GFB 시각화
     # --------------------------
     gradcam = GradCAM(model, ['encoder.7'])
-    z_test = compute_embedding(model, img_test, no_grad=False)  # for Grad-CAM
-    z_ref = compute_embedding(model, img_ref, no_grad=True)
 
-    # 1. Grad-CAM 추출
-
-    cam_test = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
-    cam_ref = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
-
-    fmap_test = model.get_feature_map(img_test).squeeze(0)
-    fmap_ref = model.get_feature_map(img_ref).squeeze(0)
-
-    # 2. factual: GFB 마스킹
-    cam1 = cam_test * filter_with_gfb(cam_test, fmap_test, gfb_tensor)
-    cam2 = cam_ref * filter_with_gfb(cam_ref, fmap_ref, gfb_tensor)
-
-    # 3. counterfactual: GFB + reference 모두와 dissimilar한 패치 강조
-    cf_mask1 = compute_counterfactual_score(fmap_test, fmap_ref, gfb_tensor, threshold=config['gfb']['threshold'])
-    cf_mask2 = compute_counterfactual_score(fmap_ref, fmap_test, gfb_tensor, threshold=config['gfb']['threshold'])
-    # 업샘플링: [16, 16] → [512, 512]
-    cf_mask1_up = F.interpolate(cf_mask1.unsqueeze(0).unsqueeze(0), size=cam_test.shape, mode='bilinear',
-                                align_corners=False).squeeze()
-    cf_mask2_up = F.interpolate(cf_mask2.unsqueeze(0).unsqueeze(0), size=cam_ref.shape, mode='bilinear',
-                                align_corners=False).squeeze()
-
-    cam3 = cam_test * cf_mask1_up.cpu().numpy()
-    cam4 = cam_ref * cf_mask2_up.cpu().numpy()
 
     def get_masked_cam(query_tensor, target_tensor, fmap):
         # 1. backbone → feature map → projection
@@ -243,19 +217,9 @@ def run_pipeline(test_img_path, gfb_option='A'):
     z_test = compute_embedding(model, img_test, no_grad=False)
     z_ref = compute_embedding(model, img_ref, no_grad=False)
 
-    cam1 = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
-    cam2 = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
-
     raw_test = Image.open(test_img_path).convert('RGB').resize(config['image']['size'])
     raw_ref = Image.open(top1_path).convert('RGB').resize(config['image']['size'])
 
-    # factual: GFB 마스크 적용
-    cam1_masked = cam1 * filter_with_gfb(cam1, feat_test.squeeze(0), gfb_tensor)
-    cam2_masked = cam2 * filter_with_gfb(cam2, feat_ref.squeeze(0), gfb_tensor)
-
-    # counterfactual: 새롭게 만든 mask 사용
-    cam3 = cam1 * cf_mask1_up.cpu().numpy()
-    cam4 = cam2 * cf_mask2_up.cpu().numpy()
 
     fmap_test = model.get_feature_map(img_test).squeeze(0)
     fmap_ref = model.get_feature_map(img_ref).squeeze(0)

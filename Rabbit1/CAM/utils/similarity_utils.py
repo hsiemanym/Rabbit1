@@ -89,8 +89,8 @@ def compute_counterfactual_score(fmap_query, fmap_ref, gfb, threshold=0.9):
     mask = []
     for qp in query_patches:
         # Reference와 최대 유사도
-        ref_sim = torch.nn.functional.cosine_similarity(qp.unsqueeze(0), ref_patches).max()
-        gfb_sim = torch.nn.functional.cosine_similarity(qp.unsqueeze(0), gfb).max()
+        ref_sim = F.cosine_similarity(qp.unsqueeze(0), ref_patches).max()
+        gfb_sim = F.cosine_similarity(qp.unsqueeze(0), gfb).max()
 
         if ref_sim < threshold and gfb_sim < threshold:
             mask.append(1.0)  # counterfactual

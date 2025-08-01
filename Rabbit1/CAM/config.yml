@@ -26,7 +26,7 @@ image:
 # GFB 필터링 기준
 # ------------------------
 gfb:
-  threshold: 0.9       # generic patch 판단 기준 유사도
+  threshold: 0.8       # generic patch 판단 기준 유사도
   min_count: 10        # (Option A) 특정 패치가 generic 되기 위한 최소 등장 횟수
   cluster_method: kmeans
   n_clusters: 25

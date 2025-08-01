@@ -84,7 +84,7 @@ def generate_image_with_edge_check(prompt, filename, max_retries=3):
     return False
 
 # Generate multiple images
-def generate_batch(total_images=1000):
+def generate_batch(total_images=100):
     used_prompts = set()
     for i in range(total_images):
         prompt = generate_prompt(attributes)
