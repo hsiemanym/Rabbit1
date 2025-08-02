@@ -8,6 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) 
 import torch
 import random
 import numpy as np
+
 # 1. Random seed 고정
 seed = 42
 random.seed(seed)
@@ -215,10 +216,21 @@ def run_pipeline(test_img_path, gfb_option='A'):
 
     # Grad-CAM 맵 (기존 방식 유지)
     gradcam = GradCAM(model, ['encoder.7'])
-    feat_test = model.get_feature_map(img_test)
-    feat_ref = model.get_feature_map(img_ref)
-    z_test = compute_embedding(model, img_test, no_grad=False)
-    z_ref = compute_embedding(model, img_ref, no_grad=False)
+
+    def generate_local_gradcam(query_tensor):
+        feat = model.forward_backbone(query_tensor)  # [1, 2048, H, W]
+        feat.retain_grad()
+        pooled = F.adaptive_avg_pool2d(feat, (1, 1)).view(1, -1)  # [1, 2048]
+        # z1 = model.projector(pooled)
+        # z2 = model.projector(target_tensor.detach())
+        # proj = model.projector(pooled) # 추가
+        z = model.projector(pooled)  # [1, 256]
+        score = z.sum() # score = proj.sum() #F.cosine_similarity(z1, z2, dim=1).sum()
+        score.backward(retain_graph=True)
+        return gradcam.generate_from_features(feat, feat.grad, query_tensor)
+
+    # z_test = compute_embedding(model, img_test, no_grad=False)
+    # z_ref = compute_embedding(model, img_ref, no_grad=False)
 
     raw_test = Image.open(test_img_path).convert('RGB').resize(config['image']['size'])
     raw_ref = Image.open(top1_path).convert('RGB').resize(config['image']['size'])
@@ -227,8 +239,8 @@ def run_pipeline(test_img_path, gfb_option='A'):
     fmap_ref = model.get_feature_map(img_ref).squeeze(0)
 
     # ---------- 1. GFB 없이 Grad-CAM만 ---------- #
-    cam0_test = gradcam.generate(img_test, F.cosine_similarity(z_test, z_ref).sum())[0]
-    cam0_ref = gradcam.generate(img_ref, F.cosine_similarity(z_ref, z_test).sum())[0]
+    cam0_test = generate_local_gradcam(img_test) # generate_local_gradcam(img_test, z_ref)
+    cam0_ref = generate_local_gradcam(img_ref) # generate_local_gradcam(img_ref, z_test)
     vis0 = overlay_heatmap(raw_test, cam0_test)
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
 
@@ -261,15 +273,20 @@ def run_pipeline(test_img_path, gfb_option='A'):
         y, x = max_y[0].item(), max_x[0].item()
 
     # 1. Grad-CAM hook 기준 feature map
-    feat_test = model.forward_backbone(img_test).detach()  # [1, 2048, H, W]
+    #feat_test = model.forward_backbone(img_test).detach()  # [1, 2048, H, W]
+    feat_test = model.forward_backbone(img_test)  # [1, 2048, H, W]
+    feat_test.retain_grad()  # hook 연결 유지
 
     # 2. 해당 위치의 vector → projection → scalar
-    patch_vector = feat_test[0, :, y, x].unsqueeze(0).requires_grad_()  # [1, 2048]
+    #patch_vector = feat_test[0, :, y, x].unsqueeze(0).requires_grad_()  # [1, 2048]
+    patch_vector = feat_test[0, :, y, x].unsqueeze(0)
     proj_vector = model.projector(patch_vector)  # [1, 256]
     score_test_cf = proj_vector.sum()
 
     # 3. Grad-CAM 수행
-    cam_test_cf = gradcam.generate(img_test, score_test_cf)[0]
+    score_test_cf.backward(retain_graph=True) # 추가
+    #cam_test_cf = gradcam.generate(img_test, score_test_cf)[0]
+    cam_test_cf = gradcam.generate_from_features(feat_test, feat_test.grad, img_test)
 
     # 4. ref image: 기존 방식 (유사도 음수)
     z_ref_cf = model.get_embedding(img_ref).requires_grad_()
