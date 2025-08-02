@@ -1,9 +1,7 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-# models/gradcam.py
 
 import torch
 import torch.nn.functional as F
@@ -34,13 +32,15 @@ class GradCAMBase:
             layer = self._get_layer(layer_name)
 
             def fwd_hook(module, input, output, layer_idx=idx):
+                print(f"[DEBUG] fwd_hook triggered for layer {layer_idx}, activation shape: {output.shape}")
                 self.activations[layer_idx] = output.detach()
 
             def bwd_hook(module, grad_input, grad_output, layer_idx=idx):
+                print(f"[DEBUG] bwd_hook called for layer {layer_idx}, grad mean: {grad_output[0].mean().item():.6f}")
                 self.gradients[layer_idx] = grad_output[0].detach()
 
             self.handles.append(layer.register_forward_hook(fwd_hook))
-            self.handles.append(layer.register_backward_hook(bwd_hook))  # warning: may deprecate in future
+            self.handles.append(layer.register_full_backward_hook(bwd_hook))
 
     def remove_hooks(self):
         for handle in self.handles:
@@ -52,13 +52,11 @@ class GradCAM(GradCAMBase):
         super().__init__(model, target_layers)
 
     def generate(self, input_tensor, target_score):
-        """
-        input_tensor: [1, 3, H, W]
-        target_score: scalar tensor with requires_grad=True
-        """
         self.model.zero_grad()
         if isinstance(target_score, torch.Tensor):
+            print("[DEBUG] Backward 시작 - target_score.requires_grad:", target_score.requires_grad)
             target_score.backward(retain_graph=True)
+            print("[DEBUG] Backward 완료")
         else:
             raise ValueError("target_score must be a scalar tensor with requires_grad=True")
 
@@ -68,7 +66,11 @@ class GradCAM(GradCAMBase):
             grad = self.gradients.get(idx)
 
             if act is None or grad is None:
+                print(f"[ERROR] Activation or gradient missing for layer {idx}")
                 raise RuntimeError(f"Missing activation/gradient for layer index {idx}")
+            else:
+                print(f"[DEBUG] GradCAM Layer {idx} → Activation shape: {act.shape}, Grad shape: {grad.shape}")
+                print(f"[DEBUG] Grad mean @ layer {idx}: {grad.mean().item():.6f}")
 
             weights = grad.mean(dim=(2, 3), keepdim=True)  # [1, C, 1, 1]
             cam = (weights * act).sum(dim=1).squeeze(0)    # [H, W]
@@ -82,42 +84,17 @@ class GradCAM(GradCAMBase):
 
         return heatmaps
 
+    def generate_from_features(self, feature_map, grad_tensor, input_tensor):
+        print("[DEBUG] generate_from_features() called")
+        print(f"[DEBUG] feature_map shape: {feature_map.shape}, grad_tensor shape: {grad_tensor.shape}")
 
-class GradCAMpp(GradCAMBase):
-    def __init__(self, model, target_layers):
-        super().__init__(model, target_layers)
+        weights = grad_tensor.mean(dim=(2, 3), keepdim=True)  # [1, C, 1, 1]
+        cam = (weights * feature_map).sum(dim=1).squeeze(0)  # [H, W]
+        cam = F.relu(cam)
 
-    def generate(self, input_tensor, target_score):
-        self.model.zero_grad()
-        if isinstance(target_score, torch.Tensor):
-            target_score.backward(retain_graph=True)
-        else:
-            raise ValueError("target_score must be a scalar tensor with requires_grad=True")
+        cam -= cam.min()
+        cam /= cam.max() + 1e-8
+        cam = cam.detach().cpu().numpy()
+        cam = cv2.resize(cam, (input_tensor.shape[3], input_tensor.shape[2]))
 
-        heatmaps = []
-        for idx in range(len(self.target_layers)):
-            act = self.activations.get(idx)
-            grad = self.gradients.get(idx)
-
-            if act is None or grad is None:
-                raise RuntimeError(f"Missing activation/gradient for layer index {idx}")
-
-            grad2 = grad ** 2
-            grad3 = grad ** 3
-            sum_act_grad2 = (act * grad2).sum(dim=(2, 3), keepdim=True)
-
-            eps = 1e-8
-            alpha = grad2 / (2 * grad2 + sum_act_grad2 * grad3 + eps)
-            alpha = torch.nan_to_num(alpha)
-
-            weights = (alpha * F.relu(grad)).sum(dim=(2, 3), keepdim=True)
-            cam = (weights * act).sum(dim=1).squeeze(0)
-            cam = F.relu(cam)
-
-            cam -= cam.min()
-            cam /= cam.max() + 1e-8
-            cam = cam.cpu().numpy()
-            cam = cv2.resize(cam, (input_tensor.shape[3], input_tensor.shape[2]))
-            heatmaps.append(cam)
-
-        return heatmaps
+        return cam

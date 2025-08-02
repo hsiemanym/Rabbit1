@@ -26,13 +26,13 @@ import argparse
 
 from torchvision import transforms  # 이미지 변환
 from PIL import Image, ImageDraw, ImageFont
+import clip
 import torch.nn.functional as F
 
 
-
-
 # Rabbit1 모델 및 유틸 모듈 import
-from utils.similarity_utils import compute_counterfactual_score
+# 상단 import에 추가
+from utils.similarity_utils1_2 import generate_patch_based_target, compute_counterfactual_score
 from models.backbone import SimSiamBackbone  # ResNet-50 기반 네트워크 백본 클래스
 from features.embeddings import compute_embedding  # 이미지를 받아 백본 모델의 임베딩 출력을 얻는 함수
 from features.generic_feature_bank import build_gfb
@@ -82,8 +82,6 @@ def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, tra
     """
     SimSiam cosine similarity top-5 → 그 중 CLIPScore 최고 후보 반환
     """
-    import clip
-    from PIL import Image
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     clip_model, preprocess = clip.load("ViT-B/32", device=device)
@@ -195,7 +193,9 @@ def run_pipeline(test_img_path, gfb_option='A'):
         feat = model.forward_backbone(query_tensor)  # [1, 2048, H, W]
         pooled = F.adaptive_avg_pool2d(feat, (1, 1))  # [1, 2048, 1, 1]
         pooled = pooled.view(pooled.size(0), -1)  # [1, 2048]
+
         pooled.requires_grad_(True)
+        print("[DEBUG] pooled.requires_grad:", pooled.requires_grad)
 
         z1 = model.projector(pooled)  # [1, 256]
         z2 = target_tensor.detach()  # [1, 256] projection-based target
@@ -204,8 +204,11 @@ def run_pipeline(test_img_path, gfb_option='A'):
         sim = F.cosine_similarity(z1, z2, dim=1)  # [1]
         target_score = sim.sum()
 
+        print("[DEBUG] Cosine similarity score (used for Grad-CAM backward):", target_score.item())
+
         # 3. Grad-CAM
         cam = gradcam.generate(query_tensor, target_score)[0]
+        print("[DEBUG] Grad-CAM done")
 
         # 4. GFB 마스킹
         return filter_with_gfb(cam, fmap, gfb_tensor)
@@ -219,7 +222,6 @@ def run_pipeline(test_img_path, gfb_option='A'):
 
     raw_test = Image.open(test_img_path).convert('RGB').resize(config['image']['size'])
     raw_ref = Image.open(top1_path).convert('RGB').resize(config['image']['size'])
-
 
     fmap_test = model.get_feature_map(img_test).squeeze(0)
     fmap_ref = model.get_feature_map(img_ref).squeeze(0)
@@ -238,13 +240,59 @@ def run_pipeline(test_img_path, gfb_option='A'):
     vis2 = overlay_heatmap(raw_test, cam1)
     vis3 = overlay_heatmap(raw_ref, cam2)
 
-    # ---------- 3. counterfactual ---------- #
-    inv_emb_test = -model.projector(emb_test.to(device))
-    inv_emb_ref = -model.projector(emb_ref.to(device))
-    cam3 = get_masked_cam(img_test, inv_emb_ref, fmap_test)
-    cam4 = get_masked_cam(img_ref, inv_emb_test, fmap_ref)
+    # ---------- 3. counterfactual (patch-aware Grad-CAM) ---------- #
+    # 1. patch-aware target weights
+    target_weights = generate_patch_based_target(
+        fmap_test, fmap_ref, gfb_tensor,
+        threshold=config['gfb']['threshold'],
+        gfb_chunk_size=32,
+        ref_chunk_size=128
+    )  # [H, W]
+
+    # 2. Get conv5 feature map from backbone
+    feat_test = model.forward_backbone(img_test)  # [1, 2048, H, W]
+    feat_test.retain_grad()
+
+    # Grad-CAM target으로 직접 projection feature를 선택해서
+    # test에서 counterfactual한 patch 위치의 projection vector 하나를 선택해서 score로 씀
+    with torch.no_grad():
+        cf_score_map = target_weights
+        max_y, max_x = torch.where(cf_score_map == cf_score_map.max())
+        y, x = max_y[0].item(), max_x[0].item()
+
+    # 1. Grad-CAM hook 기준 feature map
+    feat_test = model.forward_backbone(img_test).detach()  # [1, 2048, H, W]
+
+    # 2. 해당 위치의 vector → projection → scalar
+    patch_vector = feat_test[0, :, y, x].unsqueeze(0).requires_grad_()  # [1, 2048]
+    proj_vector = model.projector(patch_vector)  # [1, 256]
+    score_test_cf = proj_vector.sum()
+
+    # 3. Grad-CAM 수행
+    cam_test_cf = gradcam.generate(img_test, score_test_cf)[0]
+
+    # 4. ref image: 기존 방식 (유사도 음수)
+    z_ref_cf = model.get_embedding(img_ref).requires_grad_()
+    z_test_cf = model.get_embedding(img_test).detach()
+    score_ref_cf = -F.cosine_similarity(z_ref_cf, z_test_cf, dim=1).sum()
+    cam_ref_cf = gradcam.generate(img_ref, score_ref_cf)[0]
+
+    # 5. counterfactual 마스크 (GFB 기반 filtering)
+    from utils.similarity_utils import compute_counterfactual_score
+    cf_mask_test = compute_counterfactual_score(fmap_test, fmap_ref, gfb_tensor, threshold=config['gfb']['threshold'])
+    cf_mask_ref = compute_counterfactual_score(fmap_ref, fmap_test, gfb_tensor, threshold=config['gfb']['threshold'])
+
+    cf_mask_test_up = F.interpolate(cf_mask_test.unsqueeze(0).unsqueeze(0), size=cam_test_cf.shape, mode='bilinear',
+                                    align_corners=False).squeeze()
+    cf_mask_ref_up = F.interpolate(cf_mask_ref.unsqueeze(0).unsqueeze(0), size=cam_ref_cf.shape, mode='bilinear',
+                                   align_corners=False).squeeze()
+
+    # 6. masking & visualization
+    cam3 = cam_test_cf * cf_mask_test_up.cpu().numpy()
+    cam4 = cam_ref_cf * cf_mask_ref_up.cpu().numpy()
     vis4 = overlay_heatmap(raw_test, cam3)
     vis5 = overlay_heatmap(raw_ref, cam4)
+
 
     labels = [
         "Test - Factual (No GFB)", "Ref - Factual (No GFB)",

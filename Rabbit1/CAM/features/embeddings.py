@@ -3,8 +3,6 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import torch.nn.functional as F
-
 # features/embeddings.py
 
 import torch

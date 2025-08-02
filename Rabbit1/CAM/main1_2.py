@@ -1,6 +1,6 @@
 # GPU 지정 및 경로 설정
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # GPU 1번 사용
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # GPU 1번 사용
 
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))  # sys.path에 상위 디렉토리를 추가하여 모듈 임포트 경로 설정
@@ -23,11 +23,12 @@ torch.backends.cudnn.benchmark = False
 # 라이브러리 임포트 (pytorch, 데이터 처리 등)
 import yaml  # 환경설정
 import argparse
+import clip
 
 from torchvision import transforms  # 이미지 변환
 from PIL import Image, ImageDraw, ImageFont
 import torch.nn.functional as F
-
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Rabbit1 모델 및 유틸 모듈 import
 from models.backbone import SimSiamBackbone  # ResNet-50 기반 네트워크 백본 클래스
@@ -42,7 +43,7 @@ from utils.image_utils import (
     save_image
 )
 
-from sklearn.metrics.pairwise import cosine_similarity
+
 
 # --------------------------------------------------------------------------------------------
 # --------------------------------------------------------------------------------------------
@@ -79,8 +80,6 @@ def retrieve_top1_clipfiltered(test_img_path, model, reference_dict, config, tra
     """
     SimSiam cosine similarity top-5 → 그 중 CLIPScore 최고 후보 반환
     """
-    import clip
-    from PIL import Image
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     clip_model, preprocess = clip.load("ViT-B/32", device=device)
@@ -224,21 +223,24 @@ def run_pipeline(test_img_path, gfb_option='A'):
     # ---------- 1. Factual (No GFB) Grad-CAM Only ---------- #
 
     # [Test → Ref]
-    z_test_fg_test = model.get_embedding(img_test).requires_grad_()
-    z_ref_fg_test = model.get_embedding(img_ref).detach()
-    score_test_fg = F.cosine_similarity(z_test_fg_test, z_ref_fg_test, dim=1).sum()
+    feat_test = model.forward_backbone(img_test)  # [1, 2048, H, W]
+    pooled_test = F.adaptive_avg_pool2d(feat_test, (1, 1)).view(1, -1).requires_grad_()  # [1, 2048] + grad
+    z_test_proj = model.projector(pooled_test)  # [1, 256]
+
+    feat_ref = model.forward_backbone(img_ref)  # [1, 2048, H, W]
+    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1).detach()  # [1, 2048] + no grad
+    z_ref_proj = model.projector(pooled_ref)  # [1, 256]
+
+    score_test_fg = F.cosine_similarity(z_test_proj, z_ref_proj, dim=1).sum()
     cam0_test = gradcam.generate(img_test, score_test_fg)[0]
 
     # [Ref → Test]
-    ###########################################################
-    # z_ref_fg_ref = model.get_embedding(img_ref).requires_grad_()
-    #z_test_fg_ref = model.get_embedding(img_test).detach()
-    #score_ref_fg = F.cosine_similarity(z_ref_fg_ref, z_test_fg_ref, dim=1).sum()
-    #cam0_ref = gradcam.generate(img_ref, score_ref_fg)[0]
-    ############################################################
-    # Ref Grad-CAM 계산에서 정확한 경로를 지정하여 projector 포함
+    # ---------- Ref → Test (Factual, No GFB) ---------- #
     feat_ref = model.forward_backbone(img_ref)
-    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1).requires_grad_()
+    feat_ref.requires_grad_()  # 🔥 역전파 연결
+    feat_ref.retain_grad()  # 🔥 .grad가 None이 되지 않게
+
+    pooled_ref = F.adaptive_avg_pool2d(feat_ref, (1, 1)).view(1, -1)
     z_ref_proj = model.projector(pooled_ref)
 
     feat_test = model.forward_backbone(img_test)
@@ -246,8 +248,15 @@ def run_pipeline(test_img_path, gfb_option='A'):
     z_test_proj = model.projector(pooled_test)
 
     score = F.cosine_similarity(z_ref_proj, z_test_proj, dim=1).sum()
-    cam0_ref = gradcam.generate(img_ref, score)[0]
+    score.backward(retain_graph=True)
 
+    # 디버깅
+    print(f"[CHECK] feat_ref.grad mean: {feat_ref.grad.mean().item():.6f}")
+
+    # Grad-CAM 실행
+    cam0_ref = gradcam.generate_from_features(feat_ref, feat_ref.grad, img_ref)
+
+    # Visualization
     vis0 = overlay_heatmap(raw_test, cam0_test)
     vis1 = overlay_heatmap(raw_ref, cam0_ref)
 

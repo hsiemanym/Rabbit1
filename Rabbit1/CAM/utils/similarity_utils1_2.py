@@ -76,7 +76,7 @@ def rank_similarities(query, candidates, topk=1, use_torch=True):
     scores.sort(key=lambda x: x[1], reverse=True)
     return scores[:topk]
 
-
+'''
 @torch.no_grad()
 def compute_counterfactual_score(fmap_query, fmap_ref, gfb, threshold=0.9):
     """
@@ -103,7 +103,7 @@ def compute_counterfactual_score(fmap_query, fmap_ref, gfb, threshold=0.9):
         scores.append(score)
 
     return torch.tensor(scores, device=fmap_query.device).view(H, W)
-
+'''
 
 
 @torch.no_grad()
