@@ -36,7 +36,7 @@ class GradCAMBase:
                 self.activations[layer_idx] = output.detach()
 
             def bwd_hook(module, grad_input, grad_output, layer_idx=idx):
-                print(f"[DEBUG] bwd_hook called for layer {layer_idx}, grad mean: {grad_output[0].mean().item():.6f}")
+                print(f"[DEBUG] bwd_hook called for layer {layer_idx}, grad mean: {grad_output[0].mean().item():.10f}")
                 self.gradients[layer_idx] = grad_output[0].detach()
 
             self.handles.append(layer.register_forward_hook(fwd_hook))
@@ -70,7 +70,7 @@ class GradCAM(GradCAMBase):
                 raise RuntimeError(f"Missing activation/gradient for layer index {idx}")
             else:
                 print(f"[DEBUG] GradCAM Layer {idx} → Activation shape: {act.shape}, Grad shape: {grad.shape}")
-                print(f"[DEBUG] Grad mean @ layer {idx}: {grad.mean().item():.6f}")
+                print(f"[DEBUG] Grad mean @ layer {idx}: {grad.mean().item():.10f}")
 
             weights = grad.mean(dim=(2, 3), keepdim=True)  # [1, C, 1, 1]
             cam = (weights * act).sum(dim=1).squeeze(0)    # [H, W]
