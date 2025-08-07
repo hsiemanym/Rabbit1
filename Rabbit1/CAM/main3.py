@@ -117,10 +117,6 @@ def run_pipeline(test_img_path, gfb_option='A'):
     vis2 = overlay_heatmap(raw_test, cam1)
     vis3 = overlay_heatmap(raw_ref, cam2)
 
-    # =============================================================================
-    # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 이 부분을 수정합니다 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    # =============================================================================
-
     # ---------- 3. Counterfactual (patch-aware Grad-CAM) ---------- #
 
     # Test 이미지에 대한 Counterfactual CAM 생성
@@ -167,9 +163,6 @@ def run_pipeline(test_img_path, gfb_option='A'):
     vis4 = overlay_heatmap(raw_test, cam3)
     vis5 = overlay_heatmap(raw_ref, cam4)
 
-    # =============================================================================
-    # ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ 여기까지 수정합니다 ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-    # =============================================================================
 
     labels = [
         "Test - Factual (No GFB)", "Ref - Factual (No GFB)",
